@@ -17,6 +17,10 @@ const nextConfig = {
   output: 'standalone',
   // Configurações para resolver problemas de exportação
   distDir: '.next',
+  // Configuração específica para impedir problemas com páginas 404 e 500
+  trailingSlash: true,
+  // Ignorar erros específicos das páginas de erro
+  pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
   // Ignorar erros de exportação (especialmente útil para path específicos)
   onDemandEntries: {
     // Período em ms em que a página deve permanecer no buffer
