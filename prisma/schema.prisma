@@ -1,0 +1,83 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo para ordens de serviço
+model Order {
+  id                 String   @id @default(uuid())
+  transaction_id     String   // ID da transação de pagamento
+  service_id         String   // ID do serviço no sistema principal
+  provider_id        String?  // ID do provedor que executará o serviço
+  external_order_id  String?  // ID do pedido no sistema do provedor
+  status             String   // Status do pedido: pending, processing, completed, failed
+  amount             Float    // Valor do pedido
+  quantity           Int      // Quantidade do serviço
+  target_username    String   // Nome de usuário alvo do serviço
+  target_url         String?  // URL do perfil/post alvo
+  customer_name      String?  // Nome do cliente
+  customer_email     String?  // Email do cliente 
+  provider_response  Json?    // Resposta completa do provedor
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+  completed_at       DateTime?
+  logs               OrderLog[]
+  metadata           Json?    // Metadados adicionais
+  provider           Provider? @relation(fields: [provider_id], references: [id])
+
+  @@index([transaction_id])
+  @@index([status])
+  @@index([external_order_id])
+}
+
+// Modelo para provedores de serviço
+model Provider {
+  id            String    @id @default(uuid())
+  name          String
+  slug          String    @unique
+  description   String?
+  api_key       String
+  api_url       String
+  status        Boolean   @default(true)
+  metadata      Json?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+  orders        Order[]
+
+  @@index([slug])
+}
+
+// Modelo para logs de ordens
+model OrderLog {
+  id          String   @id @default(uuid())
+  order_id    String
+  level       String   // info, warn, error
+  message     String
+  data        Json?
+  created_at  DateTime @default(now())
+  order       Order    @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+}
+
+// Modelo para webhooks recebidos
+model WebhookLog {
+  id           String   @id @default(uuid())
+  webhook_type String   // provider_callback, payment_notification, etc.
+  source       String   // Nome da fonte do webhook
+  payload      Json     // Payload completo do webhook
+  processed    Boolean  @default(false)
+  received_at  DateTime @default(now())
+  processed_at DateTime?
+  error        String?
+
+  @@index([webhook_type])
+  @@index([processed])
+} 
