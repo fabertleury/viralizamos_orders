@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { processOrder } from '@/lib/process-order';
+import { processOrder } from '../../../../lib/process-order';
 import { verify } from 'jsonwebtoken';
 
 // Inicializar Prisma
