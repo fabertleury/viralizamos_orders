@@ -1,8 +1,22 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import setupScheduler from '../../../lib/init-scheduler';
 
 // Inicializar Prisma
 const prisma = new PrismaClient();
+
+// Inicializar o agendador quando o módulo for carregado
+let schedulerInitialized = false;
+let schedulerStatus = 'disabled';
+
+try {
+  const scheduler = setupScheduler();
+  schedulerInitialized = scheduler !== null;
+  schedulerStatus = schedulerInitialized ? 'running' : 'disabled';
+} catch (error) {
+  console.error('Erro ao inicializar o agendador:', error);
+  schedulerStatus = 'error';
+}
 
 /**
  * Rota para verificar a saúde do serviço
@@ -17,7 +31,8 @@ export async function GET() {
       status: 'healthy',
       service: 'orders-service',
       timestamp: new Date().toISOString(),
-      database: 'connected'
+      database: 'connected',
+      scheduler: schedulerStatus
     });
   } catch (error) {
     console.error('Erro no health check:', error);
@@ -28,6 +43,7 @@ export async function GET() {
       service: 'orders-service',
       timestamp: new Date().toISOString(),
       database: 'disconnected',
+      scheduler: schedulerStatus,
       error: error instanceof Error ? error.message : 'Erro desconhecido'
     }, { status: 500 });
   }
