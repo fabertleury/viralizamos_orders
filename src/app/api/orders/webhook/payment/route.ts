@@ -25,6 +25,7 @@ interface WebhookPayload {
       email?: string;
       phone?: string;
     };
+    external_service_id: string;
   };
 }
 
@@ -97,6 +98,7 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             service_id: body.metadata.service,
+            external_service_id: body.metadata.external_service_id,
             status: 'pending',
             amount: body.amount / postCount, // Dividir o valor total pelo número de posts
             quantity: quantityPerPost,
@@ -108,7 +110,8 @@ export async function POST(request: NextRequest) {
               post_id: post.id,
               post_code: post.code,
               payment_id: body.payment_id,
-              service_type: 'instagram'
+              service_type: 'instagram',
+              external_service_id: body.metadata.external_service_id
             }
           }
         });
@@ -134,6 +137,7 @@ export async function POST(request: NextRequest) {
         data: {
           transaction_id: body.transaction_id,
           service_id: body.metadata.service,
+          external_service_id: body.metadata.external_service_id,
           status: 'pending',
           amount: body.amount,
           quantity: 100, // Quantidade padrão
@@ -142,7 +146,8 @@ export async function POST(request: NextRequest) {
           customer_email: body.metadata.customer?.email || null,
           metadata: {
             payment_id: body.payment_id,
-            service_type: 'instagram'
+            service_type: 'instagram',
+            external_service_id: body.metadata.external_service_id
           }
         }
       });

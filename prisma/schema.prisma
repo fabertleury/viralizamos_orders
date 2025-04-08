@@ -15,6 +15,7 @@ model Order {
   id                 String   @id @default(uuid())
   transaction_id     String   // ID da transação de pagamento
   service_id         String   // ID do serviço no sistema principal
+  external_service_id String? // ID do serviço no sistema do provedor - IMPORTANTE para envio ao provedor
   provider_id        String?  // ID do provedor que executará o serviço
   external_order_id  String?  // ID do pedido no sistema do provedor
   status             String   // Status do pedido: pending, processing, completed, failed
@@ -35,6 +36,7 @@ model Order {
   @@index([transaction_id])
   @@index([status])
   @@index([external_order_id])
+  @@index([external_service_id])
 }
 
 // Modelo para provedores de serviço
@@ -65,6 +67,20 @@ model OrderLog {
   order       Order    @relation(fields: [order_id], references: [id])
 
   @@index([order_id])
+}
+
+// Modelo para logs de processamento em lote
+model BatchProcessLog {
+  id              String   @id @default(uuid())
+  type            String   // order_processing, status_check, etc.
+  total_processed Int
+  successful      Int
+  failed          Int
+  data            Json?
+  created_at      DateTime @default(now())
+
+  @@index([type])
+  @@index([created_at])
 }
 
 // Modelo para webhooks recebidos
