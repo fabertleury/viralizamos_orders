@@ -14,18 +14,22 @@ interface WebhookPayload {
   metadata: {
     service: string;
     profile: string;
+    service_type: string;
+    total_quantity?: number;
+    external_service_id: string;
+    is_followers_service?: boolean;
     posts: Array<{
       id: string;
       code: string;
       url?: string;
       caption?: string;
+      quantity?: number;
     }>;
     customer?: {
       name?: string;
       email?: string;
       phone?: string;
     };
-    external_service_id: string;
   };
 }
 
@@ -82,19 +86,24 @@ export async function POST(request: NextRequest) {
     
     // Registrar webhook no log
     console.log('[Orders Webhook] Registrando webhook no log');
-    const webhookLog = await prisma.webhookLog.create({
-      data: {
-        webhook_type: 'payment_notification',
-        source: 'payment-service',
-        payload: body as any,
-        processed: false
-      }
-    });
-    console.log('[Orders Webhook] Webhook registrado com ID:', webhookLog.id);
+    try {
+      const webhookLog = await prisma.webhookLog.create({
+        data: {
+          webhook_type: 'payment_notification',
+          source: 'payment-service',
+          payload: body as any,
+          processed: false
+        }
+      });
+      console.log('[Orders Webhook] Webhook registrado com ID:', webhookLog.id);
+    } catch (logError) {
+      console.error('[Orders Webhook] Erro ao registrar webhook no log:', logError);
+      // Continua mesmo se falhar o registro de log
+    }
     
     // Verificar tipo de webhook
     if (body.type !== 'payment_approved') {
-      console.log(`[Orders Webhook] Webhook ignorado: ${body.type}`);
+      console.log(`[Orders Webhook] Webhook ignorado: ${body.type} (esperado: payment_approved)`);
       return NextResponse.json({ message: 'Webhook recebido, mas ignorado.' });
     }
     
@@ -117,6 +126,23 @@ export async function POST(request: NextRequest) {
     console.log('[Orders Webhook] Service ID:', body.metadata.service);
     console.log('[Orders Webhook] External Service ID:', body.metadata.external_service_id);
     console.log('[Orders Webhook] Profile:', body.metadata.profile);
+    console.log('[Orders Webhook] Service type:', body.metadata.service_type);
+    console.log('[Orders Webhook] Is followers service:', body.metadata.is_followers_service);
+    
+    // Verificar duplicidade - se já existe um pedido com este transaction_id
+    const existingOrders = await prisma.order.findMany({
+      where: {
+        transaction_id: body.transaction_id
+      }
+    });
+    
+    if (existingOrders.length > 0) {
+      console.log(`[Orders Webhook] Já existem ${existingOrders.length} pedidos para esta transação ${body.transaction_id}`);
+      return NextResponse.json({
+        message: 'Webhook já processado anteriormente',
+        existingOrders: existingOrders.map(o => o.id)
+      });
+    }
     
     // Processar pedidos para cada post
     const orders = [];
@@ -141,7 +167,7 @@ export async function POST(request: NextRequest) {
               external_service_id: body.metadata.external_service_id,
               status: 'pending',
               amount: body.amount / postCount, // Dividir o valor total pelo número de posts
-              quantity: quantityPerPost,
+              quantity: post.quantity || quantityPerPost,
               target_username: body.metadata.profile,
               target_url: post.url || `https://instagram.com/p/${post.code}`,
               customer_name: body.metadata.customer?.name || null,
@@ -150,7 +176,7 @@ export async function POST(request: NextRequest) {
                 post_id: post.id,
                 post_code: post.code,
                 payment_id: body.payment_id,
-                service_type: 'instagram',
+                service_type: body.metadata.service_type || 'instagram',
                 external_service_id: body.metadata.external_service_id
               }
             }
@@ -174,7 +200,51 @@ export async function POST(request: NextRequest) {
           orders.push(order);
         } catch (orderError) {
           console.error(`[Orders Webhook] Erro ao criar pedido para post ${post.id}:`, orderError);
+          // Continuar e tentar criar os outros pedidos
         }
+      }
+    } else if (body.metadata.is_followers_service) {
+      // Criar pedido para serviço de seguidores
+      console.log('[Orders Webhook] Criando pedido para serviço de seguidores');
+      
+      try {
+        const order = await prisma.order.create({
+          data: {
+            transaction_id: body.transaction_id,
+            service_id: body.metadata.service,
+            external_service_id: body.metadata.external_service_id,
+            status: 'pending',
+            amount: body.amount,
+            quantity: body.metadata.total_quantity || 100,
+            target_username: body.metadata.profile,
+            customer_name: body.metadata.customer?.name || null,
+            customer_email: body.metadata.customer?.email || null,
+            metadata: {
+              payment_id: body.payment_id,
+              service_type: 'followers',
+              external_service_id: body.metadata.external_service_id
+            }
+          }
+        });
+        
+        console.log(`[Orders Webhook] Pedido de seguidores criado com ID: ${order.id}`);
+        
+        // Registrar log
+        await prisma.orderLog.create({
+          data: {
+            order_id: order.id,
+            level: 'info',
+            message: 'Pedido de seguidores criado a partir de pagamento aprovado',
+            data: {
+              payment_id: body.payment_id,
+              transaction_id: body.transaction_id
+            }
+          }
+        });
+        
+        orders.push(order);
+      } catch (orderError) {
+        console.error('[Orders Webhook] Erro ao criar pedido de seguidores:', orderError);
       }
     } else {
       // Se não houver posts específicos, criar um pedido geral
@@ -194,7 +264,7 @@ export async function POST(request: NextRequest) {
             customer_email: body.metadata.customer?.email || null,
             metadata: {
               payment_id: body.payment_id,
-              service_type: 'instagram',
+              service_type: body.metadata.service_type || 'instagram',
               external_service_id: body.metadata.external_service_id
             }
           }
@@ -219,6 +289,15 @@ export async function POST(request: NextRequest) {
       } catch (orderError) {
         console.error('[Orders Webhook] Erro ao criar pedido geral:', orderError);
       }
+    }
+    
+    // Verificar se algum pedido foi criado
+    if (orders.length === 0) {
+      console.error('[Orders Webhook] Nenhum pedido foi criado para esta transação');
+      return NextResponse.json(
+        { error: 'Falha ao criar pedidos' },
+        { status: 500 }
+      );
     }
     
     // Marcar webhook como processado
@@ -252,16 +331,36 @@ export async function POST(request: NextRequest) {
       order_ids: orders.map(order => order.id)
     };
     
-    console.log('[Orders Webhook] Resposta:', response);
-    return NextResponse.json(response);
+    console.log('[Orders Webhook] Resposta de sucesso:', response);
     
+    return NextResponse.json(response);
   } catch (error) {
-    console.error('[Orders Webhook] Erro ao processar webhook de pagamento:', error);
+    console.error('[Orders Webhook] Erro não tratado ao processar webhook:', error);
+    
+    // Registrar erro
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          webhook_type: 'system_error',
+          source: 'payment_webhook',
+          payload: {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            timestamp: new Date().toISOString()
+          },
+          processed: false,
+          error: error instanceof Error ? error.message : 'Erro desconhecido'
+        }
+      });
+    } catch (logError) {
+      console.error('[Orders Webhook] Erro ao registrar erro no log:', logError);
+    }
     
     return NextResponse.json(
       { 
-        error: error instanceof Error ? error.message : 'Erro desconhecido ao processar webhook' 
-      }, 
+        error: 'Erro ao processar webhook',
+        message: error instanceof Error ? error.message : 'Erro desconhecido'
+      },
       { status: 500 }
     );
   }

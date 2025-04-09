@@ -19,32 +19,59 @@ try {
 }
 
 /**
- * Rota para verificar a saúde do serviço
+ * Endpoint de verificação de saúde do serviço de orders
+ * Retorna status e informações sobre o serviço
  */
 export async function GET() {
   try {
     // Verificar conexão com o banco de dados
-    await prisma.$queryRaw`SELECT 1`;
+    const dbStatus = await checkDatabaseConnection();
     
-    // Retornar status OK
-    return NextResponse.json({
-      status: 'healthy',
-      service: 'orders-service',
+    // Construir resposta com dados do sistema
+    const response = {
+      status: 'ok',
       timestamp: new Date().toISOString(),
-      database: 'connected',
-      scheduler: schedulerStatus
-    });
+      version: process.env.npm_package_version || '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      database: {
+        connected: dbStatus.connected,
+        message: dbStatus.message
+      },
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    };
+    
+    return NextResponse.json(response);
   } catch (error) {
-    console.error('Erro no health check:', error);
+    console.error('Erro ao verificar saúde do serviço:', error);
     
-    // Retornar erro indicando problema com o banco de dados
-    return NextResponse.json({
-      status: 'unhealthy',
-      service: 'orders-service',
-      timestamp: new Date().toISOString(),
-      database: 'disconnected',
-      scheduler: schedulerStatus,
-      error: error instanceof Error ? error.message : 'Erro desconhecido'
-    }, { status: 500 });
+    return NextResponse.json(
+      { 
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Erro desconhecido',
+        timestamp: new Date().toISOString()
+      },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * Verifica a conexão com o banco de dados
+ */
+async function checkDatabaseConnection() {
+  try {
+    // Tentar executar uma consulta simples
+    const result = await prisma.$queryRaw`SELECT 1 as alive`;
+    return {
+      connected: true,
+      message: 'Database connection successful'
+    };
+  } catch (error) {
+    console.error('Erro ao conectar com o banco de dados:', error);
+    return {
+      connected: false,
+      message: error instanceof Error ? error.message : 'Erro desconhecido'
+    };
   }
 } 
