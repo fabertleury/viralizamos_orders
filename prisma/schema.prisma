@@ -26,13 +26,16 @@ model Order {
   completed_at        DateTime?
   metadata            Json?
   external_service_id String?
+  user_id             String?
   provider            Provider?  @relation(fields: [provider_id], references: [id])
+  user                User?      @relation(fields: [user_id], references: [id])
   logs                OrderLog[]
 
   @@index([transaction_id])
   @@index([status])
   @@index([external_order_id])
   @@index([external_service_id])
+  @@index([user_id])
 }
 
 model Provider {
@@ -49,6 +52,20 @@ model Provider {
   orders      Order[]
 
   @@index([slug])
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  phone        String?
+  role         String    @default("customer")
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+  orders       Order[]
+
+  @@index([email])
+  @@index([role])
 }
 
 model OrderLog {

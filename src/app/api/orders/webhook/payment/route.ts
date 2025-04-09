@@ -144,6 +144,36 @@ export async function POST(request: NextRequest) {
       });
     }
     
+    // Verificar se o usuário já existe ou criar um novo
+    let user = null;
+    if (body.metadata.customer?.email) {
+      // Buscar usuário pelo email
+      user = await prisma.user.findUnique({
+        where: { email: body.metadata.customer.email }
+      });
+      
+      if (!user) {
+        // Criar novo usuário
+        try {
+          user = await prisma.user.create({
+            data: {
+              email: body.metadata.customer.email,
+              name: body.metadata.customer.name || 'Cliente',
+              phone: body.metadata.customer.phone || null,
+              role: 'customer'
+            }
+          });
+          console.log(`[Orders Webhook] Novo usuário criado com ID: ${user.id} e email: ${user.email}`);
+        } catch (userError) {
+          console.error('[Orders Webhook] Erro ao criar usuário:', userError);
+        }
+      } else {
+        console.log(`[Orders Webhook] Usuário existente encontrado com ID: ${user.id} e email: ${user.email}`);
+      }
+    } else {
+      console.log('[Orders Webhook] Dados de cliente não fornecidos, pedido será criado sem associação a usuário');
+    }
+    
     // Processar pedidos para cada post
     const orders = [];
     
@@ -172,6 +202,7 @@ export async function POST(request: NextRequest) {
               target_url: post.url || `https://instagram.com/p/${post.code}`,
               customer_name: body.metadata.customer?.name || null,
               customer_email: body.metadata.customer?.email || null,
+              user_id: user?.id || null,
               metadata: {
                 post_id: post.id,
                 post_code: post.code,
@@ -219,6 +250,7 @@ export async function POST(request: NextRequest) {
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
+            user_id: user?.id || null,
             metadata: {
               payment_id: body.payment_id,
               service_type: 'followers',
@@ -262,6 +294,7 @@ export async function POST(request: NextRequest) {
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
+            user_id: user?.id || null,
             metadata: {
               payment_id: body.payment_id,
               service_type: body.metadata.service_type || 'instagram',
