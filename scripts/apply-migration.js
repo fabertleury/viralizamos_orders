@@ -18,20 +18,21 @@ async function applyMigration() {
   const prisma = new PrismaClient();
 
   try {
-    // 1. Ler o SQL da migração
-    const migrationPath = path.join(__dirname, '../prisma/migrations/add_external_service_id.sql');
-    const migrationSql = fs.readFileSync(migrationPath, 'utf8');
-    
-    console.log('Conteúdo da migração:');
-    console.log(migrationSql);
-    console.log('\nExecutando migração...');
+    console.log('Executando comandos SQL para adicionar a coluna...');
 
-    // 2. Executar a migração como query raw
-    await prisma.$executeRawUnsafe(migrationSql);
+    // Executar cada comando SQL separadamente
+    console.log('1. Adicionando coluna external_service_id...');
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "external_service_id" TEXT;`);
+    
+    console.log('2. Criando índice...');
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "Order_external_service_id_idx" ON "Order"("external_service_id");`);
+    
+    console.log('3. Adicionando comentário à coluna...');
+    await prisma.$executeRawUnsafe(`COMMENT ON COLUMN "Order"."external_service_id" IS 'ID do serviço no sistema do provedor - IMPORTANTE para envio ao provedor';`);
     
     console.log('✅ Migração aplicada com sucesso!');
     
-    // 3. Verificar se a coluna foi adicionada
+    // Verificar se a coluna foi adicionada
     try {
       console.log('\nVerificando se a coluna foi adicionada...');
       
