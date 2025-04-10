@@ -155,27 +155,120 @@ async function assignProviderToOrder(orderId: string): Promise<boolean> {
     
     // Determinar o tipo de serviço com base nos metadados
     const metadata = order.metadata as any || {};
-    const serviceType = metadata.service_type || 'instagram';
+    const serviceType = metadata.service_type || '';
+    const platform = metadata.platform || 'instagram';
+    const subType = metadata.sub_type || '';
     
-    // Buscar um provedor ativo para o tipo de serviço
-    const provider = await prisma.provider.findFirst({
-      where: {
-        status: true,
-        // Se houver uma lógica específica para escolher o provedor, aplicá-la aqui
-        // Por exemplo, provedores específicos para Instagram
+    console.log(`Atribuindo provedor para pedido ${orderId}. Plataforma: ${platform}, Tipo: ${serviceType}, SubTipo: ${subType}`);
+    
+    // Criar condições para a busca de provedor
+    let whereConditions: any = {
+      status: true
+    };
+    
+    // Se temos um tipo de serviço, vamos usar para filtrar provedores adequados
+    if (serviceType) {
+      whereConditions.OR = [
+        {
+          metadata: {
+            path: ['service_types'],
+            array_contains: serviceType
+          }
+        }
+      ];
+    }
+    
+    // Se conhecemos a plataforma, adicionamos à condição
+    if (platform) {
+      if (!whereConditions.OR) {
+        whereConditions.OR = [];
       }
+      
+      whereConditions.OR.push({
+        metadata: {
+          path: ['services'],
+          array_contains: platform
+        }
+      });
+      
+      whereConditions.OR.push({
+        metadata: {
+          path: ['primary_service'],
+          equals: platform
+        }
+      });
+    }
+    
+    // Buscar provedores que atendem às condições, ordenados por prioridade
+    const providers = await prisma.provider.findMany({
+      where: whereConditions,
+      orderBy: [
+        {
+          metadata: {
+            path: ['priority'],
+            sort: 'asc'
+          }
+        }
+      ]
     });
     
-    if (!provider) {
-      console.error(`Nenhum provedor disponível para o serviço do tipo ${serviceType}`);
-      return false;
+    if (providers.length === 0) {
+      console.error(`Nenhum provedor disponível para o serviço do tipo ${serviceType} na plataforma ${platform}`);
+      
+      // Tentar encontrar qualquer provedor ativo como fallback
+      const fallbackProvider = await prisma.provider.findFirst({
+        where: { status: true }
+      });
+      
+      if (!fallbackProvider) {
+        return false;
+      }
+      
+      console.log(`Usando provedor fallback: ${fallbackProvider.name}`);
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          provider_id: fallbackProvider.id
+        }
+      });
+      
+      // Registrar log
+      await prisma.orderLog.create({
+        data: {
+          order_id: orderId,
+          level: 'warning',
+          message: `Provedor fallback ${fallbackProvider.name} atribuído ao pedido`,
+          data: {
+            provider_id: fallbackProvider.id,
+            reason: 'Nenhum provedor especializado disponível'
+          }
+        }
+      });
+      
+      return true;
+    }
+    
+    // Selecionar o melhor provedor
+    // Se tivermos um subTipo específico, verificar se algum provedor é especializado
+    let selectedProvider = providers[0]; // Default para o primeiro (maior prioridade)
+    
+    if (subType) {
+      // Verificar se algum provedor tem recomendação específica para este subtipo
+      for (const provider of providers) {
+        const metadata = provider.metadata as any;
+        if (metadata.recommended_for && metadata.recommended_for.includes(subType)) {
+          selectedProvider = provider;
+          console.log(`Provedor ${provider.name} selecionado por especialização em ${subType}`);
+          break;
+        }
+      }
     }
     
     // Atribuir o provedor ao pedido
     await prisma.order.update({
       where: { id: orderId },
       data: {
-        provider_id: provider.id
+        provider_id: selectedProvider.id
       }
     });
     
@@ -184,9 +277,13 @@ async function assignProviderToOrder(orderId: string): Promise<boolean> {
       data: {
         order_id: orderId,
         level: 'info',
-        message: `Provedor ${provider.name} atribuído ao pedido`,
+        message: `Provedor ${selectedProvider.name} atribuído ao pedido`,
         data: {
-          provider_id: provider.id
+          provider_id: selectedProvider.id,
+          platform,
+          service_type: serviceType,
+          sub_type: subType,
+          selection_reason: subType ? `Especializado em ${subType}` : 'Maior prioridade'
         }
       }
     });

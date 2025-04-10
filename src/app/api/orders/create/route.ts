@@ -51,14 +51,55 @@ export async function POST(request: NextRequest) {
     }
     
     // Verificar duplicidade - se já existe um pedido com este transaction_id
-    const existingOrders = await prisma.order.findMany({
-      where: {
-        transaction_id: body.transaction_id
+    // Se tiver dados de post, considerar também isso para evitar duplicidade
+    const whereClause: any = {
+      transaction_id: body.transaction_id
+    };
+    
+    // Se tiver dados de post, adicionar condições mais específicas
+    if (body.post_data) {
+      // Se temos dados de post, verificamos de forma mais granular
+      if (body.post_data.post_id || body.post_data.post_code) {
+        // Usar o OR para verificar se existe pedido com o mesmo post ID ou post code
+        whereClause.OR = [
+          { 
+            metadata: {
+              path: ['post_id'],
+              equals: body.post_data.post_id
+            }
+          },
+          { 
+            metadata: {
+              path: ['post_code'],
+              equals: body.post_data.post_code
+            } 
+          }
+        ];
+        
+        // Incluir também verificação de URL quando disponível
+        if (body.post_data.post_url) {
+          whereClause.OR.push({
+            target_url: body.post_data.post_url
+          });
+        }
+        
+        console.log(`[Orders Create] Verificando duplicidade para post específico: ${body.post_data.post_code || body.post_data.post_id}`);
+      } else if (body.external_payment_id) {
+        // Se não temos post ID/code, mas temos ID de pagamento externo específico para o post
+        whereClause.metadata = {
+          path: ['payment_id'],
+          equals: body.external_payment_id
+        };
+        console.log(`[Orders Create] Verificando duplicidade por payment_id específico: ${body.external_payment_id}`);
       }
+    }
+    
+    const existingOrders = await prisma.order.findMany({
+      where: whereClause
     });
     
     if (existingOrders.length > 0) {
-      console.log(`[Orders Create] Já existem ${existingOrders.length} pedidos para esta transação ${body.transaction_id}`);
+      console.log(`[Orders Create] Já existem ${existingOrders.length} pedidos para esta transação/post ${body.transaction_id}`);
       return NextResponse.json({
         message: 'Pedido já processado anteriormente',
         existingOrders: existingOrders.map(o => o.id),
@@ -104,11 +145,13 @@ export async function POST(request: NextRequest) {
           transaction_id: body.transaction_id,
           service_id: body.service_id,
           external_service_id: body.external_service_id,
+          provider_id: body.provider_id || null, // ID do provedor de serviços
+          external_order_id: body.external_order_id || null, // ID do pedido no sistema do provedor
           status: 'pending',
           amount: body.amount || 0,
           quantity: body.quantity || 100,
           target_username: body.target_username,
-          target_url: body.target_url || `https://instagram.com/${body.target_username}`,
+          target_url: body.post_data?.post_url || body.target_url || `https://instagram.com/${body.target_username}`,
           customer_name: body.customer_name || null,
           customer_email: body.customer_email || null,
           user_id: user?.id || null,
@@ -117,7 +160,19 @@ export async function POST(request: NextRequest) {
             service_type: body.payment_data?.service_type || 'instagram',
             external_service_id: body.external_service_id,
             payment_method: body.payment_data?.method,
-            payment_status: body.payment_data?.status
+            payment_status: body.payment_data?.status,
+            // Incluir dados específicos do post, se existirem
+            post_id: body.post_data?.post_id || null,
+            post_code: body.post_data?.post_code || null,
+            post_type: body.post_data?.post_type || null,
+            is_reel: body.post_data?.is_reel || false,
+            // Dados de provedor específicos
+            provider_id: body.provider_id || null,
+            provider_name: body.provider_name || null,
+            external_order_data: body.external_order_data || null,
+            // Incluir dados adicionais recebidos
+            created_at: new Date().toISOString(),
+            source: 'payment-processor'
           }
         }
       });

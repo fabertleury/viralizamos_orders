@@ -10,7 +10,8 @@ datasource db {
 model Order {
   id                  String     @id @default(uuid())
   transaction_id      String
-  service_id          String
+  service_id          String?
+  service             Service?   @relation(fields: [service_id], references: [id])
   provider_id         String?
   external_order_id   String?
   status              String
@@ -36,20 +37,22 @@ model Order {
   @@index([external_order_id])
   @@index([external_service_id])
   @@index([user_id])
+  @@index([service_id])
 }
 
 model Provider {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  slug        String   @unique
+  slug        String    @unique
   description String?
   api_key     String
   api_url     String
-  status      Boolean  @default(true)
+  status      Boolean   @default(true)
   metadata    Json?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
   orders      Order[]
+  services    Service[]
 
   @@index([slug])
 }
@@ -92,4 +95,99 @@ model WebhookLog {
 
   @@index([webhook_type])
   @@index([processed])
+}
+
+model Service {
+  id                 String        @id @default(uuid())
+  provider_id        String
+  provider           Provider      @relation(fields: [provider_id], references: [id])
+  external_id        String        // ID do serviço no sistema do provedor
+  name               String
+  description        String?
+  type               String        // likes, followers, views, etc.
+  platform           String        // instagram, tiktok, facebook, etc.
+  price              Float
+  min_quantity       Int           @default(1)
+  max_quantity       Int
+  default_quantity   Int?
+  is_active          Boolean       @default(true)
+  created_at         DateTime      @default(now())
+  updated_at         DateTime      @updatedAt
+  metadata           Json?         // Informações adicionais sobre o serviço
+  orders             Order[]       // Relação com os pedidos que usam este serviço
+  category_id        String?
+  category           Category?     @relation(fields: [category_id], references: [id])
+  subcategory_id     String?
+  subcategory        Subcategory?  @relation(fields: [subcategory_id], references: [id])
+
+  @@index([provider_id])
+  @@index([external_id])
+  @@index([type])
+  @@index([platform])
+  @@index([is_active])
+  @@index([category_id])
+  @@index([subcategory_id])
+  @@unique([provider_id, external_id]) // Garante que não haja duplicatas do mesmo serviço para um provedor
+}
+
+// Nova tabela para redes sociais
+model Social {
+  id              String      @id @default(uuid())
+  name            String      // Nome da rede social (Instagram, Facebook, etc.)
+  slug            String      @unique // Slug para URL (instagram, facebook, etc.)
+  icon            String?     // Ícone para representar a rede social
+  icon_url        String?     // URL para imagem/ícone da rede social
+  description     String?     // Descrição da rede social
+  active          Boolean     @default(true)
+  order_position  Int         @default(0)
+  metadata        Json?       // Dados adicionais sobre a rede social
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+  categories      Category[]  // Categorias associadas a esta rede social
+
+  @@index([slug])
+  @@index([active])
+}
+
+// Nova tabela para categorias de serviços
+model Category {
+  id              String        @id @default(uuid())
+  name            String        // Nome da categoria
+  slug            String        @unique // Slug para URL
+  description     String?       // Descrição da categoria
+  icon            String?       // Ícone para representar a categoria
+  active          Boolean       @default(true)
+  order_position  Int           @default(0)
+  social_id       String        // Rede social a que pertence
+  social          Social        @relation(fields: [social_id], references: [id])
+  metadata        Json?         // Dados adicionais sobre a categoria
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  subcategories   Subcategory[] // Subcategorias pertencentes a esta categoria
+  services        Service[]     // Serviços associados diretamente a esta categoria
+
+  @@index([slug])
+  @@index([social_id])
+  @@index([active])
+}
+
+// Nova tabela para subcategorias de serviços
+model Subcategory {
+  id              String      @id @default(uuid())
+  name            String      // Nome da subcategoria
+  slug            String      @unique // Slug para URL
+  description     String?     // Descrição da subcategoria
+  icon            String?     // Ícone para representar a subcategoria
+  active          Boolean     @default(true)
+  order_position  Int         @default(0)
+  category_id     String      // Categoria a que pertence
+  category        Category    @relation(fields: [category_id], references: [id])
+  metadata        Json?       // Dados adicionais sobre a subcategoria
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @updatedAt
+  services        Service[]   // Serviços associados a esta subcategoria
+
+  @@index([slug])
+  @@index([category_id])
+  @@index([active])
 }
