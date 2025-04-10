@@ -1,13 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import { verify } from '@/lib/auth';
+// Replace the import with inline authentication check
+// import { verify } from '@/lib/auth';
 
 const prisma = new PrismaClient();
+
+// Simple auth function
+async function verifyRequest(request: NextRequest) {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { success: false, message: 'Missing or invalid Authorization header' };
+  }
+  
+  const apiKey = authHeader.substring(7);
+  const validApiKey = process.env.API_KEY;
+  
+  if (!validApiKey) {
+    console.warn('API_KEY not configured in .env');
+    return { success: false, message: 'API key not configured on server' };
+  }
+  
+  return { 
+    success: apiKey === validApiKey,
+    message: apiKey === validApiKey ? 'Authorized' : 'Invalid API key' 
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
     // Verificar autenticação
-    const authResult = await verify(request);
+    const authResult = await verifyRequest(request);
     if (!authResult.success) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }

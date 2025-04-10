@@ -27,7 +27,7 @@ function parseSqlInsertFile(filePath) {
     // Handle multiple value sets
     // Split on '),(' pattern but keep delimiters with the appropriate part
     const valuesSets = valuesText.split(/\),\s*\(/);
-    
+      
     for (let i = 0; i < valuesSets.length; i++) {
       let valueSet = valuesSets[i];
       
