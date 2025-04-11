@@ -1,0 +1,196 @@
+scalar DateTime
+scalar JSON
+
+# ---------- Tipos ----------
+
+# Pedido (Order)
+type Order {
+  id: ID!
+  status: String!
+  quantity: Int!
+  target_username: String
+  price: Float
+  total_price: Float
+  service_id: ID!
+  service_name: String
+  customer_id: ID
+  provider_id: ID
+  social_id: ID
+  created_at: DateTime!
+  updated_at: DateTime
+  logs: [OrderLog]
+}
+
+# Log de pedido
+type OrderLog {
+  id: ID!
+  order_id: ID!
+  status: String!
+  notes: String
+  created_at: DateTime!
+  metadata: JSON
+}
+
+# Provedor (Provider)
+type Provider {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  api_key: String!
+  api_url: String!
+  status: Boolean!
+  metadata: JSON
+  created_at: DateTime!
+  updated_at: DateTime
+  services: [Service]
+}
+
+# Serviço (Service)
+type Service {
+  id: ID!
+  name: String!
+  description: String
+  price: Float!
+  min_quantity: Int
+  max_quantity: Int
+  default_quantity: Int
+  type: String
+  is_active: Boolean!
+  provider_id: ID
+  category_id: ID
+  external_id: String
+  created_at: DateTime!
+  updated_at: DateTime
+  metadata: JSON
+}
+
+# ---------- Queries ----------
+
+type Query {
+  # Pedidos
+  orders(
+    status: String
+    search: String
+    username: String
+    limit: Int
+    offset: Int
+  ): [Order]
+  
+  ordersCount(
+    status: String
+    search: String
+    username: String
+  ): Int!
+  
+  order(id: ID!): Order
+  
+  orderLogs(orderId: ID!): [OrderLog]
+  
+  # Provedores
+  providers(search: String): [Provider]
+  
+  provider(id: ID!): Provider
+  
+  providerBySlug(slug: String!): Provider
+  
+  # Serviços
+  services(
+    search: String
+    provider_id: ID
+    category_id: ID
+    limit: Int
+    offset: Int
+  ): [Service]
+  
+  servicesCount(
+    search: String
+    provider_id: ID
+    category_id: ID
+  ): Int!
+  
+  service(id: ID!): Service
+  
+  servicesByProvider(providerId: ID!): [Service]
+  
+  serviceByExternalId(externalId: String!, providerId: ID!): Service
+  
+  serviceByNameAndProvider(name: String!, providerId: ID!): Service
+}
+
+# ---------- Mutations ----------
+
+type Mutation {
+  # Pedidos
+  createOrder(
+    service_id: ID!
+    quantity: Int!
+    target_username: String!
+    provider_id: ID!
+    social_id: ID
+    customer_id: ID
+  ): Order
+  
+  updateOrderStatus(
+    id: ID!
+    status: String!
+    notes: String
+  ): Order
+  
+  # Provedores
+  createProvider(
+    name: String!
+    slug: String!
+    description: String
+    api_key: String!
+    api_url: String!
+    status: Boolean
+  ): Provider
+  
+  updateProvider(
+    id: ID!
+    name: String
+    slug: String
+    description: String
+    api_key: String
+    api_url: String
+    status: Boolean
+    metadata: JSON
+  ): Provider
+  
+  deleteProvider(id: ID!): Boolean
+  
+  # Serviços
+  createService(
+    name: String!
+    description: String
+    price: Float!
+    min_quantity: Int
+    max_quantity: Int
+    default_quantity: Int
+    type: String
+    provider_id: ID!
+    category_id: ID
+    external_id: String
+    is_active: Boolean
+    metadata: JSON
+  ): Service
+  
+  updateService(
+    id: ID!
+    name: String
+    description: String
+    price: Float
+    min_quantity: Int
+    max_quantity: Int
+    default_quantity: Int
+    type: String
+    provider_id: ID
+    category_id: ID
+    external_id: String
+    is_active: Boolean
+    metadata: JSON
+  ): Service
+  
+  deleteService(id: ID!): Boolean
+} 
