@@ -1,0 +1,190 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id                  String     @id @default(uuid())
+  transaction_id      String
+  service_id          String?
+  provider_id         String?
+  external_order_id   String?
+  status              String
+  amount              Float
+  quantity            Int
+  target_username     String
+  target_url          String?
+  customer_name       String?
+  customer_email      String?
+  provider_response   Json?
+  created_at          DateTime   @default(now())
+  updated_at          DateTime   @updatedAt
+  completed_at        DateTime?
+  metadata            Json?
+  external_service_id String?
+  user_id             String?
+  provider            Provider?  @relation(fields: [provider_id], references: [id])
+  service             Service?   @relation(fields: [service_id], references: [id])
+  user                User?      @relation(fields: [user_id], references: [id])
+  logs                OrderLog[]
+
+  @@index([transaction_id])
+  @@index([status])
+  @@index([external_order_id])
+  @@index([external_service_id])
+  @@index([user_id])
+  @@index([service_id])
+}
+
+model Provider {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String?
+  api_key     String
+  api_url     String
+  status      Boolean   @default(true)
+  metadata    Json?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  orders      Order[]
+  services    Service[]
+
+  @@index([slug])
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  name       String
+  phone      String?
+  role       String   @default("customer")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  orders     Order[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model OrderLog {
+  id         String   @id @default(uuid())
+  order_id   String
+  level      String
+  message    String
+  data       Json?
+  created_at DateTime @default(now())
+  order      Order    @relation(fields: [order_id], references: [id])
+
+  @@index([order_id])
+}
+
+model WebhookLog {
+  id           String    @id @default(uuid())
+  webhook_type String
+  source       String
+  payload      Json
+  processed    Boolean   @default(false)
+  received_at  DateTime  @default(now())
+  processed_at DateTime?
+  error        String?
+
+  @@index([webhook_type])
+  @@index([processed])
+}
+
+model Service {
+  id               String       @id @default(uuid())
+  provider_id      String
+  external_id      String
+  name             String
+  description      String?
+  type             String
+  platform         String
+  price            Float
+  min_quantity     Int          @default(1)
+  max_quantity     Int
+  default_quantity Int?
+  is_active        Boolean      @default(true)
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
+  metadata         Json?
+  category_id      String?
+  subcategory_id   String?
+  orders           Order[]
+  category         Category?    @relation(fields: [category_id], references: [id])
+  provider         Provider     @relation(fields: [provider_id], references: [id])
+  subcategory      Subcategory? @relation(fields: [subcategory_id], references: [id])
+
+  @@unique([provider_id, external_id])
+  @@index([provider_id])
+  @@index([external_id])
+  @@index([type])
+  @@index([platform])
+  @@index([is_active])
+  @@index([category_id])
+  @@index([subcategory_id])
+}
+
+model Social {
+  id             String     @id @default(uuid())
+  name           String
+  slug           String     @unique
+  icon           String?
+  icon_url       String?
+  description    String?
+  active         Boolean    @default(true)
+  order_position Int        @default(0)
+  metadata       Json?
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @updatedAt
+  categories     Category[]
+
+  @@index([slug])
+  @@index([active])
+}
+
+model Category {
+  id             String        @id @default(uuid())
+  name           String
+  slug           String        @unique
+  description    String?
+  icon           String?
+  active         Boolean       @default(true)
+  order_position Int           @default(0)
+  social_id      String
+  metadata       Json?
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+  social         Social        @relation(fields: [social_id], references: [id])
+  services       Service[]
+  subcategories  Subcategory[]
+
+  @@index([slug])
+  @@index([social_id])
+  @@index([active])
+}
+
+model Subcategory {
+  id             String    @id @default(uuid())
+  name           String
+  slug           String    @unique
+  description    String?
+  icon           String?
+  active         Boolean   @default(true)
+  order_position Int       @default(0)
+  category_id    String
+  metadata       Json?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  services       Service[]
+  category       Category  @relation(fields: [category_id], references: [id])
+
+  @@index([slug])
+  @@index([category_id])
+  @@index([active])
+}

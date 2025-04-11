@@ -5,6 +5,18 @@ import { verify } from 'jsonwebtoken';
 // Inicializar Prisma
 const prisma = new PrismaClient();
 
+interface CreateOrderRequest {
+  transaction_id: string;
+  service_id: string;
+  target_username: string;
+  post_data?: {
+    post_id?: string;
+    post_code?: string;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}
+
 /**
  * Endpoint para criar pedidos a partir do sistema de pagamentos
  * Esta rota é chamada pelo processador de fila do sistema de pagamentos
@@ -33,11 +45,12 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Obter dados da requisição
-    const body = await request.json();
+    // Parse request body
+    const body = await request.json() as CreateOrderRequest;
+    
     console.log('[Orders Create] Recebida solicitação para criar pedido:', body.transaction_id);
     
-    // Validar dados obrigatórios
+    // Validate required fields
     if (!body.transaction_id || !body.service_id || !body.target_username) {
       console.error('[Orders Create] Dados incompletos na solicitação:', { 
         transaction_id: body.transaction_id, 

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "nodemon",
     "build": "tsc -p tsconfig.json",
+    "build:railway": "tsc -p tsconfig.json --noEmitOnError false",
     "postbuild": "node -e \"const fs=require('fs');const path=require('path');if(!fs.existsSync('dist/prisma')){fs.mkdirSync('dist/prisma',{recursive:true})};fs.cpSync('prisma','dist/prisma',{recursive:true});\"",
     "start": "cross-env NODE_ENV=production node dist/server.js",
     "lint": "eslint src --ext .ts --max-warnings=0",

@@ -6,6 +6,13 @@ import { pendingOrdersQueue, statusCheckQueue } from '../../../../lib/scheduler'
  * Rota para administração do agendador de tarefas
  * Permite disparar jobs manualmente e verificar o status
  */
+
+interface SchedulerRequest {
+  action: string;
+  queue: string;
+  limit?: number;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Verificar autenticação
@@ -31,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Obter parâmetros da requisição
-    const { action, queue, limit = 10 } = await request.json();
+    const { action, queue, limit = 10 } = await request.json() as SchedulerRequest;
     
     if (!action) {
       return NextResponse.json(
