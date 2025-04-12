@@ -2,6 +2,10 @@
 
 echo "=== STARTING VIRALIZAMOS ORDERS SERVICE ==="
 
+# Garantir que o Prisma é gerado antes de iniciar a aplicação
+echo "Gerando cliente Prisma..."
+npx prisma generate
+
 # Diretório para arquivos estáticos
 cd /app
 mkdir -p public

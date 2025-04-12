@@ -3,6 +3,8 @@ FROM node:18-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY prisma ./prisma
+
 RUN npm ci
 
 FROM node:18-alpine AS builder
@@ -42,6 +44,12 @@ RUN if [ ! -d "/app/dist/prisma" ]; then \
 # Copiar o diretório prisma explicitamente
 COPY prisma ./prisma
 COPY prisma ./dist/prisma
+
+# Instalar apenas dependências de produção
+RUN npm ci --omit=dev
+
+# IMPORTANTE: Gerar o cliente Prisma
+RUN npx prisma generate
 
 EXPOSE 4000
 
