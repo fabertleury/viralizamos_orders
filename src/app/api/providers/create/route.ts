@@ -22,7 +22,9 @@ async function verifyRequest(request: NextRequest) {
   
   return { 
     success: apiKey === validApiKey,
-    message: apiKey === validApiKey ? 'Authorized' : 'Invalid API key' 
+    message: apiKey === validApiKey ? 'Authorized' : 'Invalid API key',
+    // Adicionar role para compatibilidade
+    isAdmin: apiKey === validApiKey
   };
 }
 
@@ -34,13 +36,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    // Verificar permissões de admin
-    if (authResult.role !== 'admin') {
+    // Verificar permissões de admin (modificado para usar isAdmin)
+    if (!authResult.isAdmin) {
       return NextResponse.json({ error: 'Permissão negada' }, { status: 403 });
     }
 
     // Obter dados do provider
-    const body = await request.json();
+    const body = await request.json() as {
+      name: string;
+      slug: string;
+      description?: string;
+      api_key: string;
+      api_url: string;
+      metadata?: Record<string, any>;
+    };
+    
     const { name, slug, description, api_key, api_url, metadata } = body;
 
     // Validar dados obrigatórios

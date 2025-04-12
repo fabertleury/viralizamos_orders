@@ -35,7 +35,11 @@ export async function POST(request: NextRequest) {
     }
     
     // Obter parâmetros da requisição
-    const { limit = 10, orderId } = await request.json();
+    const body = await request.json() as {
+      limit?: number;
+      orderId?: string;
+    };
+    const { limit = 10, orderId } = body;
     
     // Se um ID específico foi fornecido, processar apenas esse pedido
     if (orderId) {

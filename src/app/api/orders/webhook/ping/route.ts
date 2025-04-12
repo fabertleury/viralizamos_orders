@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
         data: {
           webhook_type: 'ping_test',
           source: 'payment-service',
-          payload: body,
+          payload: body as any,
           processed: true,
           processed_at: new Date()
         }
