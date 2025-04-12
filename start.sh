@@ -27,6 +27,15 @@ else
   echo "AVISO: Esquema Prisma não encontrado em /app/prisma/schema.prisma"
 fi
 
+# Executar script para corrigir o banco de dados
+echo "🔧 Executando script de correção do banco de dados..."
+if [ -f "/app/scripts/fix-database.js" ]; then
+  NODE_ENV=production node /app/scripts/fix-database.js
+  echo "✅ Script de correção do banco de dados concluído"
+else
+  echo "⚠️ Script de correção do banco de dados não encontrado em /app/scripts/fix-database.js"
+fi
+
 # Verificar arquivos disponíveis
 echo "Arquivos disponíveis em /app:"
 ls -la /app
