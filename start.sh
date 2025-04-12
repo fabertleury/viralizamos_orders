@@ -38,6 +38,33 @@ cat /app/dist/server.js | head -n 20 || echo "Arquivo server.js não encontrado 
 # Criar arquivo estático para healthcheck
 echo '{"status":"ok","service":"viralizamos-orders"}' > /app/public/health.json
 
-# Iniciar o servidor
-echo "Iniciando servidor principal..."
-NODE_ENV=production node /app/dist/server.js 
+# Verificar se o servidor principal existe
+if [ -f "/app/dist/server.js" ]; then
+  echo "Tentando iniciar o servidor principal..."
+  
+  # Criar um arquivo de flag para verificar se o servidor iniciou corretamente
+  rm -f /tmp/server_started
+  
+  # Executar o servidor principal em segundo plano
+  NODE_ENV=production node /app/dist/server.js &
+  SERVER_PID=$!
+  
+  # Esperar até 10 segundos para ver se o servidor inicia corretamente
+  echo "Aguardando inicialização do servidor (10 segundos)..."
+  sleep 10
+  
+  # Verificar se o servidor ainda está em execução
+  if kill -0 $SERVER_PID 2>/dev/null; then
+    echo "✅ Servidor principal iniciado com sucesso (PID: $SERVER_PID)"
+    # Aguardar o servidor principal
+    wait $SERVER_PID
+  else
+    echo "❌ Servidor principal falhou ao iniciar"
+    echo "🔄 Iniciando servidor de fallback..."
+    NODE_ENV=production node /app/dist/fallback-server.js
+  fi
+else
+  echo "❌ Servidor principal não encontrado"
+  echo "🔄 Iniciando servidor de fallback..."
+  NODE_ENV=production node /app/dist/fallback-server.js
+fi 
