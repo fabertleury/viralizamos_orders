@@ -1,0 +1,50 @@
+scalar DateTime
+
+type Query {
+  ping: String
+  health: HealthCheck
+  services: [Service!]!
+  orders: [Order!]!
+}
+
+type Mutation {
+  processOrder(id: ID!): Order
+  createOrder(input: OrderInput!): Order
+}
+
+type HealthCheck {
+  status: String!
+  timestamp: DateTime!
+  service: String!
+}
+
+type Service {
+  id: ID!
+  name: String!
+  description: String
+  price: Float
+  type: String
+  status: String
+  createdAt: DateTime!
+  updatedAt: DateTime
+}
+
+type Order {
+  id: ID!
+  transactionId: String!
+  status: String!
+  amount: Float
+  quantity: Int
+  targetUsername: String!
+  createdAt: DateTime!
+  updatedAt: DateTime
+}
+
+input OrderInput {
+  transactionId: String!
+  serviceId: String
+  externalServiceId: String
+  targetUsername: String!
+  amount: Float
+  quantity: Int
+} 

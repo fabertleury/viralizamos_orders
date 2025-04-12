@@ -14,6 +14,7 @@ try {
   // Verificar e compilar o GraphQL schema se o script existir
   console.log('📜 Verificando schema GraphQL...');
   const schemaScriptPath = path.join(__dirname, '../src/scripts/generate-schema.ts');
+  const schemaDestPath = path.join(__dirname, '../src/schema.graphql');
   
   if (fs.existsSync(schemaScriptPath)) {
     console.log('📜 Compilando schema GraphQL...');
@@ -25,6 +26,23 @@ try {
     }
   } else {
     console.warn('⚠️ Arquivo generate-schema.ts não encontrado, pulando esta etapa.');
+  }
+  
+  // Verificar se precisamos adicionar o escalar DateTime ao schema
+  if (fs.existsSync(schemaDestPath)) {
+    console.log('📝 Verificando se o schema GraphQL tem o scalar DateTime...');
+    let schemaContent = fs.readFileSync(schemaDestPath, 'utf8');
+    
+    if (!schemaContent.includes('scalar DateTime')) {
+      console.log('📝 Adicionando scalar DateTime ao schema GraphQL...');
+      schemaContent = `scalar DateTime\n\n${schemaContent}`;
+      fs.writeFileSync(schemaDestPath, schemaContent);
+      console.log('✅ Scalar DateTime adicionado ao schema GraphQL');
+    } else {
+      console.log('✅ Scalar DateTime já existe no schema GraphQL');
+    }
+  } else {
+    console.warn('⚠️ Arquivo schema.graphql não encontrado, pulando esta etapa.');
   }
   
   // Compilar TypeScript ignorando erros (usando --noEmitOnError false)
@@ -62,69 +80,121 @@ try {
   console.log('🔧 Criando servidor fallback para contingência...');
   const fallbackServerCode = `
 const http = require('http');
+const express = require('express');
+const { ApolloServer, gql } = require('apollo-server-express');
+const { GraphQLScalarType } = require('graphql');
+const { Kind } = require('graphql/language');
+
+// Configurações
 const PORT = process.env.PORT || 4000;
 
-// Criar servidor HTTP básico
-const server = http.createServer((req, res) => {
-  console.log(\`Requisição recebida: \${req.method} \${req.url}\`);
-  
-  // Rota de healthcheck
-  if (req.url === '/health' || req.url === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      service: 'viralizamos-orders (fallback)',
-      timestamp: new Date().toISOString()
-    }));
-    return;
-  }
-  
-  // Rota para criar ordens
-  if (req.url === '/api/orders/create' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk.toString();
-    });
-    
-    req.on('end', () => {
-      console.log('Dados recebidos na rota /api/orders/create:', body);
-      
-      // Responder com sucesso fictício
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        order_id: 'fallback-' + Date.now(),
-        message: 'Ordem criada pelo servidor de contingência'
-      }));
-    });
-    return;
-  }
-  
-  // Rota principal
-  if (req.url === '/' || req.url === '/api') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status: 'ok',
-      service: 'viralizamos-orders-api',
-      mode: 'fallback',
-      timestamp: new Date().toISOString()
-    }));
-    return;
-  }
-  
-  // Erro 404 para outras rotas
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    error: 'Not Found',
-    message: 'O recurso solicitado não existe'
-  }));
+// Criar aplicação Express
+const app = express();
+app.use(express.json());
+
+// Definir tipo DateTime escalar
+const dateTimeScalar = new GraphQLScalarType({
+  name: 'DateTime',
+  description: 'DateTime scalar type',
+  serialize(value) {
+    return value instanceof Date ? value.toISOString() : value;
+  },
+  parseValue(value) {
+    return new Date(value);
+  },
+  parseLiteral(ast) {
+    if (ast.kind === Kind.STRING) {
+      return new Date(ast.value);
+    }
+    return null;
+  },
 });
 
-// Iniciar servidor
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(\`🚀 Servidor fallback rodando na porta \${PORT}\`);
-  console.log('⚠️ Este é um servidor de contingência com funcionalidade ampliada');
-  console.log('⚠️ Endpoints disponíveis: /health, /api/orders/create');
+// Definir schema GraphQL mínimo
+const typeDefs = gql\`
+  scalar DateTime
+  
+  type Query {
+    ping: String
+    health: HealthCheck
+  }
+  
+  type HealthCheck {
+    status: String!
+    timestamp: DateTime!
+    service: String!
+  }
+\`;
+
+// Definir resolvers
+const resolvers = {
+  DateTime: dateTimeScalar,
+  Query: {
+    ping: () => 'pong',
+    health: () => ({
+      status: 'ok',
+      timestamp: new Date(),
+      service: 'viralizamos-orders-fallback'
+    }),
+  },
+};
+
+// Rota de healthcheck
+app.get('/health', (_, res) => {
+  console.log('Health check acessado');
+  res.status(200).json({ 
+    status: 'ok', 
+    service: 'viralizamos-orders-fallback',
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// Rota para criar ordens
+app.post('/api/orders/create', (req, res) => {
+  try {
+    console.log('Dados recebidos na rota /api/orders/create:', JSON.stringify(req.body));
+    
+    // Responder com sucesso fictício
+    res.status(200).json({
+      success: true,
+      order_id: 'fallback-' + Date.now(),
+      message: 'Ordem criada pelo servidor de contingência'
+    });
+  } catch (error) {
+    console.error('Erro ao processar pedido:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erro ao processar pedido'
+    });
+  }
+});
+
+// Configurar Apollo Server
+async function startServer() {
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    introspection: true,
+    context: ({ req }) => ({
+      token: req.headers.authorization || '',
+    }),
+  });
+
+  await server.start();
+  server.applyMiddleware({ app, path: '/graphql' });
+
+  // Iniciar servidor HTTP
+  const httpServer = http.createServer(app);
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(\`🚀 Servidor fallback rodando em http://0.0.0.0:\${PORT}\`);
+    console.log(\`📊 GraphQL disponível em http://0.0.0.0:\${PORT}\${server.graphqlPath}\`);
+    console.log('⚠️ Este é um servidor de contingência com funcionalidade ampliada');
+    console.log('⚠️ Endpoints disponíveis: /health, /api/orders/create, /graphql');
+  });
+}
+
+startServer().catch(error => {
+  console.error('❌ Erro ao iniciar servidor Apollo:', error);
 });`;
 
   fs.writeFileSync('dist/fallback-server.js', fallbackServerCode);
