@@ -13,12 +13,15 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run deploy:build
 
+# Copiar o arquivo de healthcheck standalone para a pasta dist
+RUN cp src/standalone-health.js dist/
+
 FROM node:18-alpine AS runner
 
 WORKDIR /app
 
-# Instalar ferramentas básicas para debug
-RUN apk add --no-cache curl busybox-extras
+# Instalar ferramentas básicas para debug e monitoramento
+RUN apk add --no-cache curl busybox-extras procps
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
