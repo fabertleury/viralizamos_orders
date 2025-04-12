@@ -21,11 +21,15 @@ RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
 # Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/
 
+# Verificar se o schema.prisma existe
+RUN ls -la ./prisma/
+RUN cat ./prisma/schema.prisma | head -n 10
+
 # Criar diretório para o output do Prisma Client
 RUN mkdir -p node_modules/.prisma/client
 
-# Gerar o Prisma Client especificando explicitamente os alvos binários
-RUN npx prisma@4.8.1 generate --schema=./prisma/schema.prisma --generator-provider=prisma-client-js --binary-targets=linux-musl
+# Gerar o Prisma Client com comando mais simples
+RUN npx prisma@4.8.1 generate
 
 # Verificar se os binários foram gerados corretamente
 RUN ls -la node_modules/.prisma/client || true
