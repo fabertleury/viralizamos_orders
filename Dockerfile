@@ -2,8 +2,8 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Instalar ferramentas básicas para debug e monitoramento
-RUN apk add --no-cache curl postgresql-client
+# Instalar ferramentas básicas e OpenSSL para o Prisma
+RUN apk add --no-cache curl postgresql-client openssl openssl-dev
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -21,8 +21,11 @@ COPY prisma ./prisma/
 # Criar diretório para o output do Prisma Client
 RUN mkdir -p node_modules/.prisma/client
 
-# Gerar o Prisma Client
-RUN npx prisma generate
+# Gerar o Prisma Client com flags específicos para garantir a compilação correta
+RUN npx prisma generate --generator-provider=prisma-client-js --binary-targets=native,linux-musl
+
+# Verificar se os binários foram gerados corretamente
+RUN ls -la node_modules/.prisma/client
 
 # Copiar o servidor completo
 COPY complete-server.js ./
