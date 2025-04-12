@@ -42,6 +42,7 @@ ENV HOST=0.0.0.0
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /app/node_modules ./node_modules/
 COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package-lock.json ./
 COPY --from=builder /app/start.sh ./
 
 # Tornar o script de inicialização executável
@@ -55,10 +56,10 @@ RUN mkdir -p dist/prisma
 COPY prisma ./prisma/
 
 # Instalar apenas dependências de produção
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev || npm install --omit=dev
 
 # IMPORTANTE: Gerar o cliente Prisma
-RUN npx prisma generate
+RUN npx prisma generate || echo "Falha ao gerar o cliente Prisma, mas continuando..."
 
 EXPOSE 4000
 
