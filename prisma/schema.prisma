@@ -14,9 +14,11 @@ model User {
   name       String?
   phone      String?
   role       String   @default("customer")
-  orders     Order[]
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  
+  @@index([email])
+  @@index([role])
 }
 
 model Provider {
@@ -26,9 +28,11 @@ model Provider {
   api_url    String?
   api_key    String?
   status     Boolean  @default(true)
-  orders     Order[]
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  
+  @@index([slug])
+  @@index([status])
 }
 
 model Order {
@@ -38,6 +42,7 @@ model Order {
   external_service_id String?
   external_order_id  String?
   provider_id        String?
+  user_id            String?
   status             String     @default("pending")
   amount             Float?
   quantity           Int?
@@ -50,15 +55,13 @@ model Order {
   updated_at         DateTime   @updatedAt
   completed_at       DateTime?
   metadata           Json?
-  user_id            String?
-  
-  service            Service?   @relation(fields: [service_id], references: [id], onDelete: SetNull)
-  provider           Provider?  @relation(fields: [provider_id], references: [id], onDelete: SetNull)
-  logs               OrderLog[]
   
   @@index([transaction_id])
   @@index([status])
   @@index([external_order_id])
+  @@index([service_id])
+  @@index([provider_id])
+  @@index([user_id])
 }
 
 model OrderLog {
@@ -68,8 +71,6 @@ model OrderLog {
   message    String
   data       Json?
   created_at DateTime @default(now())
-  
-  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
   
   @@index([order_id])
   @@index([level])
@@ -109,8 +110,6 @@ model Service {
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
   metadata    Json?
-  
-  orders      Order[]
   
   @@index([type])
   @@index([status])
