@@ -15,9 +15,13 @@ COPY package.json ./
 
 # Criar pasta public para healthcheck
 RUN mkdir -p public
+RUN mkdir -p dist
 
 # Criar arquivo estático para healthcheck
 RUN echo '{"status":"ok","service":"viralizamos-orders-basic"}' > ./public/health.json
+
+# Criar link para o servidor básico na pasta dist para compatibilidade
+RUN echo 'require("../basic-server.js");' > ./dist/server.js
 
 # Health check básico
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
