@@ -8,7 +8,21 @@ const prisma = new PrismaClient();
 // Resolvers para o GraphQL
 export const resolvers = {
   // Scalar resolvers
-  DateTime: DateTimeResolver,
+  DateTime: {
+    // Implementação simples do resolver DateTime
+    serialize(value: Date): string {
+      return value.toISOString();
+    },
+    parseValue(value: any): Date {
+      return new Date(value);
+    },
+    parseLiteral(ast: any): Date | null {
+      if (ast.kind === 'StringValue') {
+        return new Date(ast.value);
+      }
+      return null;
+    }
+  },
   
   Query: {
     // Manter apenas os resolvers de entidades que ainda existem
@@ -18,7 +32,7 @@ export const resolvers = {
     providers: () => {
       return prisma.provider.findMany();
     },
-    provider: (_, { id }) => {
+    provider: (_: any, { id }: { id: string }) => {
       return prisma.provider.findUnique({
         where: { id }
       });
@@ -28,7 +42,7 @@ export const resolvers = {
     users: () => {
       return prisma.user.findMany();
     },
-    user: (_, { id }) => {
+    user: (_: any, { id }: { id: string }) => {
       return prisma.user.findUnique({
         where: { id }
       });
@@ -48,13 +62,13 @@ export const resolvers = {
     ...orderResolvers.Mutation,
     
     // Log resolvers
-    createOrderLog: async (_, { orderId, level, message, data }) => {
+    createOrderLog: async (_: any, { orderId, level, message, data }: { orderId: string, level: string, message: string, data: any }) => {
       const log = await prisma.orderLog.create({
         data: {
           order_id: orderId,
           level,
           message,
-          data,
+          data
         }
       });
       
@@ -62,7 +76,7 @@ export const resolvers = {
     },
     
     // Provider resolvers
-    createProvider: async (_, { name, slug, apiUrl, apiKey }) => {
+    createProvider: async (_: any, { name, slug, apiUrl, apiKey }: { name: string, slug: string, apiUrl: string, apiKey: string }) => {
       const provider = await prisma.provider.create({
         data: {
           name,
@@ -76,7 +90,7 @@ export const resolvers = {
       return provider;
     },
     
-    updateProvider: async (_, { id, name, slug, apiUrl, apiKey, status }) => {
+    updateProvider: async (_: any, { id, name, slug, apiUrl, apiKey, status }: { id: string, name?: string, slug?: string, apiUrl?: string, apiKey?: string, status?: boolean }) => {
       const provider = await prisma.provider.update({
         where: { id },
         data: {
@@ -92,7 +106,7 @@ export const resolvers = {
     },
     
     // Order status update resolver
-    updateOrderStatus: async (_, { id, status, externalId, response }) => {
+    updateOrderStatus: async (_: any, { id, status, externalId, response }: { id: string, status: string, externalId?: string, response?: any }) => {
       const order = await prisma.order.update({
         where: { id },
         data: {
@@ -112,7 +126,7 @@ export const resolvers = {
             previous_status: order.status,
             new_status: status,
             external_id: externalId
-          },
+          }
         }
       });
       

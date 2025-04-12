@@ -4,15 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "nodemon",
-    "build": "tsc",
+    "build": "node scripts/build-server.js",
     "start": "cross-env NODE_ENV=production node dist/server.js",
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "postbuild": "node -e \"const fs=require('fs');const path=require('path');if(!fs.existsSync('dist/prisma')){fs.mkdirSync('dist/prisma',{recursive:true})};fs.cpSync('prisma','dist/prisma',{recursive:true});\"",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "build:railway": "tsc --skipLibCheck",
-    "deploy:build": "npm run build:railway && npm run postbuild",
+    "build:railway": "node scripts/build-server.js",
+    "deploy:build": "npm run build:railway",
     "healthcheck": "curl -f http://localhost:${PORT:-4000}/health || exit 1"
   },
   "dependencies": {

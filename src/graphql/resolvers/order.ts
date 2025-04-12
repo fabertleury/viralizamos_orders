@@ -69,18 +69,24 @@ export const orderResolvers = {
       const { transaction_id, external_service_id, provider_id, target_username, target_url, quantity, attributes } = args;
       
       try {
-        // Criar a ordem
+        // Criar a ordem - convertendo provider_id para o tipo correto
+        let orderData: any = {
+          transaction_id,
+          external_service_id,
+          target_username,
+          target_url,
+          quantity: quantity || 1,
+          metadata: attributes || {},
+          status: 'pending'
+        };
+        
+        // Só adicionar provider_id se ele existir
+        if (provider_id) {
+          orderData.provider_id = provider_id;
+        }
+        
         const order = await prisma.order.create({
-          data: {
-            transaction_id,
-            external_service_id,
-            provider_id,
-            target_username,
-            target_url,
-            quantity: quantity || 1,
-            metadata: attributes || {},
-            status: 'pending'
-          }
+          data: orderData
         });
         
         // Registrar o log

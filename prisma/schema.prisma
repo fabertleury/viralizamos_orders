@@ -7,76 +7,70 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Order {
-  id                  String     @id @default(uuid())
-  transaction_id      String
-  provider_id         String?
-  external_order_id   String?
-  status              String
-  amount              Float
-  quantity            Int
-  target_username     String
-  target_url          String?
-  customer_name       String?
-  customer_email      String?
-  provider_response   Json?
-  created_at          DateTime   @default(now())
-  updated_at          DateTime   @updatedAt
-  completed_at        DateTime?
-  metadata            Json?
-  external_service_id String?
-  user_id             String?
-  provider            Provider?  @relation(fields: [provider_id], references: [id])
-  user                User?      @relation(fields: [user_id], references: [id])
-  logs                OrderLog[]
-
-  @@index([transaction_id])
-  @@index([status])
-  @@index([external_order_id])
-  @@index([external_service_id])
-  @@index([user_id])
-}
-
-model Provider {
-  id          String    @id @default(uuid())
-  name        String
-  slug        String    @unique
-  description String?
-  api_key     String
-  api_url     String
-  status      Boolean   @default(true)
-  metadata    Json?
-  created_at  DateTime  @default(now())
-  updated_at  DateTime  @updatedAt
-  orders      Order[]
-
-  @@index([slug])
-}
-
 model User {
   id         String   @id @default(uuid())
   email      String   @unique
-  name       String
+  name       String?
   phone      String?
   role       String   @default("customer")
+  orders     Order[]
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
-  orders     Order[]
+}
 
-  @@index([email])
-  @@index([role])
+model Provider {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  api_url    String?
+  api_key    String?
+  status     Boolean  @default(true)
+  orders     Order[]
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model Order {
+  id                String     @id @default(uuid())
+  transaction_id    String?
+  external_service_id String?
+  external_order_id String?
+  provider          Provider?  @relation(fields: [provider_id], references: [id])
+  provider_id       String?
+  user              User?      @relation(fields: [user_id], references: [id])
+  user_id           String?
+  status            String     @default("pending")
+  quantity          Int        @default(1)
+  amount            Float?
+  target_username   String?
+  target_url        String?
+  customer_name     String?
+  customer_email    String?
+  metadata          Json?
+  provider_response Json?
+  logs              OrderLog[]
+  created_at        DateTime   @default(now())
+  updated_at        DateTime   @updatedAt
 }
 
 model OrderLog {
   id         String   @id @default(uuid())
+  order      Order    @relation(fields: [order_id], references: [id])
   order_id   String
-  level      String
+  level      String   @default("info")
   message    String
   data       Json?
   created_at DateTime @default(now())
-  order      Order    @relation(fields: [order_id], references: [id])
+}
 
-  @@index([order_id])
+model BatchProcessLog {
+  id               String   @id @default(uuid())
+  type             String
+  total_processed  Int      @default(0)
+  successful       Int      @default(0)
+  failed           Int      @default(0)
+  data             Json?
+  created_at       DateTime @default(now())
 }
 
 model WebhookLog {
