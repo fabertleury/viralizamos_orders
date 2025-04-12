@@ -2,6 +2,13 @@
 
 echo "=== STARTING VIRALIZAMOS ORDERS SERVICE ==="
 
+# Install cross-env if it's not available
+if ! command -v cross-env >/dev/null 2>&1; then
+  echo "Installing cross-env..."
+  npm install -g cross-env
+  npm install --save cross-env
+fi
+
 # Garantir que as pastas necessárias existam
 mkdir -p /app/dist/prisma
 mkdir -p /app/public
@@ -20,7 +27,7 @@ ls -la /app/dist || echo "Pasta dist não encontrada ou vazia"
 # Tentar usar o servidor fallback diretamente
 if [ -f "/app/dist/server.js" ]; then
   echo "Iniciando servidor..."
-  exec node /app/dist/server.js
+  exec NODE_ENV=production node /app/dist/server.js
 else
   echo "Servidor principal não encontrado, usando implementação interna..."
   

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "nodemon",
     "build": "node scripts/build-server.js",
-    "start": "cross-env NODE_ENV=production node dist/server.js",
+    "start": "NODE_ENV=production node dist/server.js",
     "start:prod": "NODE_ENV=production node dist/server.js",
     "start:windows": "set NODE_ENV=production && node dist/server.js",
     "lint": "eslint src --ext .ts",

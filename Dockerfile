@@ -13,6 +13,9 @@ ENV PORT=4000
 COPY package.json ./
 COPY start.sh ./
 
+# Instalar cross-env globalmente
+RUN npm install -g cross-env
+
 # Tornar o script de inicialização executável
 RUN chmod +x ./start.sh
 
