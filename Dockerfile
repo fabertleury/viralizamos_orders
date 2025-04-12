@@ -10,6 +10,8 @@ ENV HOST=0.0.0.0
 ENV PORT=4000
 # Adicionar mirror de binários do Prisma para ajudar no download
 ENV PRISMA_BINARIES_MIRROR=https://prisma-builds.s3-eu-west-1.amazonaws.com
+# Ignorar erros de verificação de checksum conforme mensagem de erro
+ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 
 # Copiar arquivos necessários para instalar dependências
 COPY package*.json ./
