@@ -35,9 +35,13 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
   
-  // Rota de saúde
+  // Rota de healthcheck explícita (para Railway)
   app.get('/health', (_, res) => {
-    res.status(200).send({ status: 'ok', service: 'viralizamos-orders-graphql' });
+    res.status(200).json({ 
+      status: 'ok', 
+      service: 'viralizamos-orders-graphql',
+      timestamp: new Date().toISOString() 
+    });
   });
   
   // Aplicar middleware Apollo ao Express
@@ -55,9 +59,11 @@ async function startServer() {
   
   // Iniciar o servidor HTTP
   const PORT = process.env.PORT || 4000;
-  await new Promise<void>((resolve) => httpServer.listen({ port: PORT }, resolve));
+  const HOST = process.env.HOST || '0.0.0.0';
+  await new Promise<void>((resolve) => httpServer.listen({ port: PORT, host: HOST }, resolve));
   
-  console.log(`🚀 Servidor GraphQL rodando em http://localhost:${PORT}/graphql`);
+  console.log(`🚀 Servidor GraphQL rodando em http://${HOST}:${PORT}/graphql`);
+  console.log(`📊 Healthcheck disponível em http://${HOST}:${PORT}/health`);
 }
 
 // Iniciar o servidor e tratar erros
