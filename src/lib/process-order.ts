@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
+import { createSupabaseClient } from '../utils/supabase-client';
 
 const prisma = new PrismaClient();
 
@@ -23,8 +24,10 @@ export async function processOrder(orderId: string): Promise<boolean> {
 
     // Verificar se já tem um provedor designado
     if (!order.provider_id) {
-      // Se não tiver, atribuir um provedor com base no tipo de serviço
-      await assignProviderToOrder(orderId);
+      // Se não tiver provedor, buscar do Supabase usando o service_id armazenado nos metadados ou o external_service_id
+      const metadata = order.metadata as any || {};
+      const supabaseServiceId = metadata.service_id_supabase;
+      await fetchAndAssignProviderFromSupabase(orderId, supabaseServiceId, order.external_service_id);
       
       // Recarregar o pedido após atribuir o provedor
       const updatedOrder = await prisma.order.findUnique({
@@ -35,15 +38,18 @@ export async function processOrder(orderId: string): Promise<boolean> {
       });
       
       if (!updatedOrder || !updatedOrder.provider_id) {
-        console.error(`Não foi possível atribuir um provedor ao pedido ${orderId}`);
+        console.error(`Não foi possível encontrar um provedor para o pedido ${orderId}`);
         
         // Registrar o erro no log
         await prisma.orderLog.create({
           data: {
             order_id: orderId,
             level: 'error',
-            message: 'Não foi possível atribuir um provedor',
-            data: {}
+            message: 'Não foi possível encontrar um provedor para o serviço',
+            data: {
+              service_id_supabase: supabaseServiceId,
+              external_service_id: order.external_service_id
+            }
           }
         });
         
@@ -54,8 +60,72 @@ export async function processOrder(orderId: string): Promise<boolean> {
     // Extrair metadados
     const metadata = order.metadata as any || {};
     
-    // IMPORTANTE: Usar o external_service_id para o provedor em vez do service_id interno
-    const serviceId = order.external_service_id || metadata.external_service_id || order.service_id;
+    // Verificar se há informações de usuário nos metadados e atualizar o user_id se necessário
+    if (!order.user_id && (metadata.customer_id || metadata.user_id)) {
+      const userId = metadata.customer_id || metadata.user_id;
+      console.log(`Atualizando user_id para o pedido ${orderId}: ${userId}`);
+      
+      // Verificar se o usuário existe ou criar um novo
+      let user = null;
+      
+      if (userId) {
+        user = await prisma.user.findUnique({
+          where: { id: userId }
+        });
+      }
+      
+      // Se não encontrou pelo ID mas temos o email, buscar pelo email
+      if (!user && metadata.customer_email) {
+        user = await prisma.user.findUnique({
+          where: { email: metadata.customer_email }
+        });
+        
+        // Se ainda não existe e temos email, criar usuário
+        if (!user && metadata.customer_email) {
+          try {
+            user = await prisma.user.create({
+              data: {
+                email: metadata.customer_email,
+                name: metadata.customer_name || order.customer_name || 'Cliente',
+                role: 'customer'
+              }
+            });
+            console.log(`Usuário criado com ID: ${user.id} para o pedido ${orderId}`);
+          } catch (userError) {
+            console.error(`Erro ao criar usuário para o pedido ${orderId}:`, userError);
+          }
+        }
+      }
+      
+      // Se temos um usuário, atualizar o pedido
+      if (user) {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { user_id: user.id }
+        });
+        console.log(`Pedido ${orderId} atualizado com user_id: ${user.id}`);
+      }
+    }
+    
+    // IMPORTANTE: Usar o external_service_id para o provedor
+    const serviceId = order.external_service_id || metadata.external_service_id;
+    
+    if (!serviceId) {
+      console.error(`Pedido ${orderId} não possui external_service_id necessário para processamento`);
+      
+      await prisma.orderLog.create({
+        data: {
+          order_id: orderId,
+          level: 'error',
+          message: 'Pedido não possui external_service_id necessário',
+          data: {
+            order_id: orderId
+          }
+        }
+      });
+      
+      return false;
+    }
     
     console.log(`Processando pedido ${orderId} - Serviço (ID externo): ${serviceId}`);
 
@@ -140,135 +210,97 @@ export async function processOrder(orderId: string): Promise<boolean> {
 }
 
 /**
- * Atribui um provedor adequado ao pedido
+ * Busca o provedor no Supabase e o associa ao pedido
  */
-async function assignProviderToOrder(orderId: string): Promise<boolean> {
+async function fetchAndAssignProviderFromSupabase(orderId: string, serviceId?: string, externalServiceId?: string): Promise<boolean> {
   try {
-    // Buscar o pedido
-    const order = await prisma.order.findUnique({
-      where: { id: orderId }
-    });
-    
-    if (!order) {
+    // Se não temos um service_id para consultar, não podemos continuar
+    if (!serviceId && !externalServiceId) {
+      console.error('Não é possível buscar o provedor sem service_id_supabase ou external_service_id');
       return false;
     }
     
-    // Determinar o tipo de serviço com base nos metadados
-    const metadata = order.metadata as any || {};
-    const serviceType = metadata.service_type || '';
-    const platform = metadata.platform || 'instagram';
-    const subType = metadata.sub_type || '';
+    console.log(`Buscando provedor no Supabase para serviço ID: ${serviceId || externalServiceId}`);
     
-    console.log(`Atribuindo provedor para pedido ${orderId}. Plataforma: ${platform}, Tipo: ${serviceType}, SubTipo: ${subType}`);
+    // Criar cliente Supabase
+    const supabase = createSupabaseClient();
     
-    // Criar condições para a busca de provedor
-    let whereConditions: any = {
-      status: true
-    };
+    // Consultar o serviço no Supabase
+    let serviceQuery = supabase.from('services').select('id, name, provider_id, external_id');
     
-    // Se temos um tipo de serviço, vamos usar para filtrar provedores adequados
-    if (serviceType) {
-      whereConditions.OR = [
-        {
-          metadata: {
-            path: ['service_types'],
-            array_contains: serviceType
-          }
-        }
-      ];
+    // Usar o ID apropriado para a consulta
+    if (serviceId) {
+      serviceQuery = serviceQuery.eq('id', serviceId);
+    } else if (externalServiceId) {
+      serviceQuery = serviceQuery.eq('external_id', externalServiceId);
     }
     
-    // Se conhecemos a plataforma, adicionamos à condição
-    if (platform) {
-      if (!whereConditions.OR) {
-        whereConditions.OR = [];
-      }
-      
-      whereConditions.OR.push({
-        metadata: {
-          path: ['services'],
-          array_contains: platform
-        }
-      });
-      
-      whereConditions.OR.push({
-        metadata: {
-          path: ['primary_service'],
-          equals: platform
-        }
-      });
+    const { data: serviceData, error: serviceError } = await serviceQuery.single();
+    
+    if (serviceError || !serviceData) {
+      console.error('Erro ao buscar serviço no Supabase:', serviceError);
+      return false;
     }
     
-    // Buscar provedores que atendem às condições, ordenados por prioridade
-    const providers = await prisma.provider.findMany({
-      where: whereConditions,
-      orderBy: [
-        {
-          metadata: {
-            path: ['priority'],
-            sort: 'asc'
-          }
-        }
-      ]
+    // Verificar se o serviço tem provider_id
+    if (!serviceData.provider_id) {
+      console.error(`Serviço encontrado, mas sem provider_id: ${serviceData.id} - ${serviceData.name}`);
+      return false;
+    }
+    
+    // Buscar provedor no Supabase
+    const { data: providerData, error: providerError } = await supabase
+      .from('providers')
+      .select('id, name, api_key, api_url, status')
+      .eq('id', serviceData.provider_id)
+      .single();
+      
+    if (providerError || !providerData) {
+      console.error('Erro ao buscar provedor no Supabase:', providerError);
+      return false;
+    }
+    
+    // Verificar se o provedor já existe no banco local
+    let localProvider = await prisma.provider.findUnique({
+      where: { id: providerData.id }
     });
     
-    if (providers.length === 0) {
-      console.error(`Nenhum provedor disponível para o serviço do tipo ${serviceType} na plataforma ${platform}`);
+    // Se não existir, criar o provedor no banco local
+    if (!localProvider) {
+      console.log(`Criando provedor local para ${providerData.name} (${providerData.id})`);
       
-      // Tentar encontrar qualquer provedor ativo como fallback
-      const fallbackProvider = await prisma.provider.findFirst({
-        where: { status: true }
-      });
-      
-      if (!fallbackProvider) {
-        return false;
-      }
-      
-      console.log(`Usando provedor fallback: ${fallbackProvider.name}`);
-      await prisma.order.update({
-        where: { id: orderId },
+      localProvider = await prisma.provider.create({
         data: {
-          provider_id: fallbackProvider.id
+          id: providerData.id,
+          name: providerData.name,
+          slug: providerData.name.toLowerCase().replace(/\s+/g, '-'),
+          api_key: providerData.api_key || '',
+          api_url: providerData.api_url || '',
+          status: providerData.status
         }
       });
-      
-      // Registrar log
-      await prisma.orderLog.create({
-        data: {
-          order_id: orderId,
-          level: 'warning',
-          message: `Provedor fallback ${fallbackProvider.name} atribuído ao pedido`,
-          data: {
-            provider_id: fallbackProvider.id,
-            reason: 'Nenhum provedor especializado disponível'
-          }
-        }
-      });
-      
-      return true;
     }
     
-    // Selecionar o melhor provedor
-    // Se tivermos um subTipo específico, verificar se algum provedor é especializado
-    let selectedProvider = providers[0]; // Default para o primeiro (maior prioridade)
-    
-    if (subType) {
-      // Verificar se algum provedor tem recomendação específica para este subtipo
-      for (const provider of providers) {
-        const metadata = provider.metadata as any;
-        if (metadata.recommended_for && metadata.recommended_for.includes(subType)) {
-          selectedProvider = provider;
-          console.log(`Provedor ${provider.name} selecionado por especialização em ${subType}`);
-          break;
-        }
-      }
-    }
-    
-    // Atribuir o provedor ao pedido
+    // Vincular o provedor ao pedido e atualizar os metadados
+    const orderData = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { metadata: true }
+    });
+
+    // Converter o metadata do JSON para objeto e depois voltar para JSON
+    const existingMetadata = orderData?.metadata ? { ...(orderData.metadata as any) } : {};
+
     await prisma.order.update({
       where: { id: orderId },
       data: {
-        provider_id: selectedProvider.id
+        provider_id: localProvider.id,
+        external_service_id: serviceData.external_id,
+        metadata: {
+          ...existingMetadata,
+          service_id_supabase: serviceData.id,
+          service_name: serviceData.name,
+          external_service_id: serviceData.external_id
+        }
       }
     });
     
@@ -277,20 +309,19 @@ async function assignProviderToOrder(orderId: string): Promise<boolean> {
       data: {
         order_id: orderId,
         level: 'info',
-        message: `Provedor ${selectedProvider.name} atribuído ao pedido`,
+        message: 'Provedor atribuído a partir do Supabase',
         data: {
-          provider_id: selectedProvider.id,
-          platform,
-          service_type: serviceType,
-          sub_type: subType,
-          selection_reason: subType ? `Especializado em ${subType}` : 'Maior prioridade'
+          provider_id: localProvider.id,
+          provider_name: localProvider.name,
+          service_id_supabase: serviceData.id,
+          external_service_id: serviceData.external_id
         }
       }
     });
     
     return true;
   } catch (error) {
-    console.error(`Erro ao atribuir provedor ao pedido ${orderId}:`, error);
+    console.error('Erro ao buscar provedor do Supabase:', error);
     return false;
   }
 } 
