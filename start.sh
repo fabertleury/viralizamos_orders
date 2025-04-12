@@ -28,6 +28,10 @@ else
   echo "⚠️ Script de correção do banco de dados não encontrado em /app/scripts/fix-database.js"
 fi
 
+# Garantir que o servidor fallback exista
+echo "🔧 Verificando se o servidor fallback existe..."
+node /app/scripts/ensure-fallback-server.js
+
 # Verificar arquivos disponíveis
 echo "Arquivos disponíveis em /app:"
 ls -la /app
