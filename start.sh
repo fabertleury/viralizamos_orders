@@ -19,6 +19,14 @@ echo "NODE_ENV: ${NODE_ENV:-development}"
 echo "REDIS_URL: ${REDIS_URL:-não definido}"
 echo "DATABASE_URL: ${DATABASE_URL:-não definido}"
 
+# Verificar a presença do esquema Prisma
+if [ -f "/app/prisma/schema.prisma" ]; then
+  echo "Esquema Prisma encontrado. Gerando cliente..."
+  npx prisma generate
+else
+  echo "AVISO: Esquema Prisma não encontrado em /app/prisma/schema.prisma"
+fi
+
 # Verificar arquivos disponíveis
 echo "Arquivos disponíveis em /app:"
 ls -la /app
