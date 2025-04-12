@@ -8,17 +8,14 @@ RUN apk add --no-cache curl postgresql-client openssl openssl-dev libc6-compat
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=4000
-# Desativar o download de engines do Prisma completamente
-ENV PRISMA_CLI_BINARY_TARGETS=native
-ENV PRISMA_CLIENT_ENGINE_TYPE=binary
-# Ignorar erros de verificação de checksum
+# Configurar ambientes para o Prisma
 ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 
 # Copiar arquivos necessários para instalar dependências
 COPY package*.json ./
 
 # Instalar dependências com versão específica do Prisma
-RUN npm uninstall prisma @prisma/client
+RUN npm uninstall prisma @prisma/client || true
 RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
 
 # Copiar arquivos Prisma primeiro para gerar o cliente
@@ -27,8 +24,8 @@ COPY prisma ./prisma/
 # Criar diretório para o output do Prisma Client
 RUN mkdir -p node_modules/.prisma/client
 
-# Gerar o Prisma Client com uma versão específica e modo offline
-RUN npx prisma@4.8.1 generate --schema=./prisma/schema.prisma
+# Gerar o Prisma Client especificando explicitamente os alvos binários
+RUN npx prisma@4.8.1 generate --schema=./prisma/schema.prisma --generator-provider=prisma-client-js --binary-targets=linux-musl
 
 # Verificar se os binários foram gerados corretamente
 RUN ls -la node_modules/.prisma/client || true
