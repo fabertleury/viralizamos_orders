@@ -3,11 +3,13 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Instalar ferramentas básicas e OpenSSL para o Prisma
-RUN apk add --no-cache curl postgresql-client openssl openssl-dev
+RUN apk add --no-cache curl postgresql-client openssl openssl-dev libc6-compat
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=4000
+# Adicionar mirror de binários do Prisma para ajudar no download
+ENV PRISMA_BINARIES_MIRROR=https://prisma-builds.s3-eu-west-1.amazonaws.com
 
 # Copiar arquivos necessários para instalar dependências
 COPY package*.json ./
@@ -21,8 +23,9 @@ COPY prisma ./prisma/
 # Criar diretório para o output do Prisma Client
 RUN mkdir -p node_modules/.prisma/client
 
-# Gerar o Prisma Client com flags específicos para garantir a compilação correta
-RUN npx prisma generate --generator-provider=prisma-client-js --binary-targets=native,linux-musl
+# Gerar o Prisma Client simplificado (usando configurações do schema.prisma)
+RUN echo "Gerando cliente Prisma, isso pode levar alguns minutos..."
+RUN npx prisma generate
 
 # Verificar se os binários foram gerados corretamente
 RUN ls -la node_modules/.prisma/client
