@@ -2,8 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Instalar ferramentas básicas e OpenSSL para o Prisma
+# Instalar ferramentas básicas e OpenSSL para o Prisma (garantindo versão 3.0.x)
 RUN apk add --no-cache curl postgresql-client openssl openssl-dev libc6-compat
+
+# Verificar a versão do OpenSSL
+RUN openssl version
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -21,18 +24,21 @@ RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
 # Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/
 
-# Verificar se o schema.prisma existe
+# Verificar se o schema.prisma existe e mostrar seu conteúdo
 RUN ls -la ./prisma/
-RUN cat ./prisma/schema.prisma | head -n 10
+RUN cat ./prisma/schema.prisma
 
 # Criar diretório para o output do Prisma Client
 RUN mkdir -p node_modules/.prisma/client
 
-# Gerar o Prisma Client com comando mais simples
+# Limpar quaisquer binários existentes para evitar conflitos
+RUN rm -rf node_modules/.prisma/client/runtime || true
+
+# Gerar o Prisma Client 
 RUN npx prisma@4.8.1 generate
 
-# Verificar se os binários foram gerados corretamente
-RUN ls -la node_modules/.prisma/client || true
+# Verificar quais binários foram gerados
+RUN find node_modules/.prisma/client/runtime -name "*.node" || true
 
 # Copiar o servidor completo
 COPY complete-server.js ./
