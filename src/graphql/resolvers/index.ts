@@ -1,28 +1,34 @@
 import { PrismaClient } from '@prisma/client';
-import { GraphQLError } from 'graphql';
-import { DateTimeResolver } from 'graphql-scalars';
+import { ApolloError } from 'apollo-server-express';
+import { GraphQLScalarType, Kind } from 'graphql';
+import { DateTimeResolver, JSONObjectResolver } from 'graphql-scalars';
 import { orderResolvers } from './order';
 
 const prisma = new PrismaClient();
 
+// Definição do escalar DateTime
+const dateTimeScalar = new GraphQLScalarType({
+  name: 'DateTime',
+  description: 'Data e hora no formato ISO 8601',
+  serialize(value) {
+    return value instanceof Date ? value.toISOString() : value;
+  },
+  parseValue(value) {
+    return new Date(value);
+  },
+  parseLiteral(ast) {
+    if (ast.kind === Kind.STRING) {
+      return new Date(ast.value);
+    }
+    return null;
+  },
+});
+
 // Resolvers para o GraphQL
 export const resolvers = {
   // Scalar resolvers
-  DateTime: {
-    // Implementação simples do resolver DateTime
-    serialize(value: Date): string {
-      return value.toISOString();
-    },
-    parseValue(value: any): Date {
-      return new Date(value);
-    },
-    parseLiteral(ast: any): Date | null {
-      if (ast.kind === 'StringValue') {
-        return new Date(ast.value);
-      }
-      return null;
-    }
-  },
+  DateTime: dateTimeScalar,
+  JSONObject: JSONObjectResolver,
   
   Query: {
     // Manter apenas os resolvers de entidades que ainda existem
@@ -52,7 +58,8 @@ export const resolvers = {
     health: () => {
       return {
         status: 'ok',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        service: 'viralizamos-orders-api'
       };
     }
   },

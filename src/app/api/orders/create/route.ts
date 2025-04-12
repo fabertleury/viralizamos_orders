@@ -275,6 +275,7 @@ export async function POST(request: NextRequest) {
           user_id: userId,
           metadata: {
             payment_id: body.external_payment_id,
+            service_id: body.service_id, // Movido para metadata para evitar erro de chave estrangeira
             service_id_supabase: body.service_id, // Armazenar o ID do serviço do Supabase
             service_name: serviceName,
             service_type: body.payment_data?.service_type || 'instagram',

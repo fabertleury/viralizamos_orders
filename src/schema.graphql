@@ -1,13 +1,15 @@
 scalar DateTime
 
 type Query {
+  # Consultas
   ping: String
   health: HealthCheck
-  services: [Service!]!
   orders: [Order!]!
+  order(id: ID!): Order
 }
 
 type Mutation {
+  # Mutações
   processOrder(id: ID!): Order
   createOrder(input: OrderInput!): Order
 }
@@ -18,33 +20,71 @@ type HealthCheck {
   service: String!
 }
 
+type Order {
+  id: ID!
+  transactionId: String!
+  externalServiceId: String
+  externalOrderId: String
+  status: String!
+  amount: Float
+  quantity: Int
+  targetUsername: String!
+  targetUrl: String
+  customerName: String
+  customerEmail: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  completedAt: DateTime
+  metadata: JSONObject
+}
+
+type OrderLog {
+  id: ID!
+  orderId: String!
+  level: String!
+  message: String!
+  data: JSONObject
+  createdAt: DateTime!
+  order: Order
+}
+
 type Service {
   id: ID!
   name: String!
   description: String
   price: Float
   type: String
-  status: String
+  status: String!
   createdAt: DateTime!
-  updatedAt: DateTime
+  updatedAt: DateTime!
+  metadata: JSONObject
 }
 
-type Order {
+type Provider {
   id: ID!
-  transactionId: String!
-  status: String!
-  amount: Float
-  quantity: Int
-  targetUsername: String!
+  name: String!
+  slug: String!
+  apiUrl: String
+  status: Boolean!
   createdAt: DateTime!
-  updatedAt: DateTime
+  updatedAt: DateTime!
+  metadata: JSONObject
+  description: String
 }
 
 input OrderInput {
   transactionId: String!
   serviceId: String
   externalServiceId: String
+  providerId: String
   targetUsername: String!
   amount: Float
   quantity: Int
-} 
+  targetUrl: String
+  customerName: String
+  customerEmail: String
+  metadata: JSONObject
+}
+
+# Escalar para campos JSON
+scalar JSONObject 

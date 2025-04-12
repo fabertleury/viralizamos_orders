@@ -32,36 +32,47 @@ model Provider {
 }
 
 model Order {
-  id                String     @id @default(uuid())
-  transaction_id    String?
+  id                 String     @id @default(uuid())
+  transaction_id     String
+  service_id         String?
   external_service_id String?
-  external_order_id String?
-  provider          Provider?  @relation(fields: [provider_id], references: [id])
-  provider_id       String?
-  user              User?      @relation(fields: [user_id], references: [id])
-  user_id           String?
-  status            String     @default("pending")
-  quantity          Int        @default(1)
-  amount            Float?
-  target_username   String?
-  target_url        String?
-  customer_name     String?
-  customer_email    String?
-  metadata          Json?
-  provider_response Json?
-  logs              OrderLog[]
-  created_at        DateTime   @default(now())
-  updated_at        DateTime   @updatedAt
+  external_order_id  String?
+  provider_id        String?
+  status             String     @default("pending")
+  amount             Float?
+  quantity           Int?
+  target_username    String
+  target_url         String?
+  customer_name      String?
+  customer_email     String?
+  provider_response  Json?
+  created_at         DateTime   @default(now())
+  updated_at         DateTime   @updatedAt
+  completed_at       DateTime?
+  metadata           Json?
+  user_id            String?
+  
+  service            Service?   @relation(fields: [service_id], references: [id], onDelete: SetNull)
+  provider           Provider?  @relation(fields: [provider_id], references: [id], onDelete: SetNull)
+  logs               OrderLog[]
+  
+  @@index([transaction_id])
+  @@index([status])
+  @@index([external_order_id])
 }
 
 model OrderLog {
   id         String   @id @default(uuid())
-  order      Order    @relation(fields: [order_id], references: [id])
   order_id   String
   level      String   @default("info")
   message    String
   data       Json?
   created_at DateTime @default(now())
+  
+  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  
+  @@index([order_id])
+  @@index([level])
 }
 
 model BatchProcessLog {
@@ -86,4 +97,35 @@ model WebhookLog {
 
   @@index([webhook_type])
   @@index([processed])
+}
+
+model Service {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  price       Float?
+  type        String?
+  status      String   @default("active")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  metadata    Json?
+  
+  orders      Order[]
+  
+  @@index([type])
+  @@index([status])
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  status      Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  metadata    Json?
+  
+  @@index([slug])
+  @@index([status])
 } 
