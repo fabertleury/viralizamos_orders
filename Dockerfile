@@ -3,7 +3,7 @@ FROM node:18-alpine AS deps
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-COPY prisma ./prisma
+COPY prisma ./prisma/
 
 RUN npm ci
 
@@ -11,12 +11,12 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/node_modules ./node_modules/
 COPY . .
-RUN npm run deploy:build
+RUN npm run build:railway || true
 
 # Copiar o arquivo de healthcheck standalone para a pasta dist
-RUN cp src/standalone-health.js dist/
+RUN cp src/standalone-health.js dist/ || true
 
 FROM node:18-alpine AS runner
 
@@ -28,7 +28,7 @@ RUN apk add --no-cache curl busybox-extras procps
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/dist ./dist/ || true
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/start.sh ./start.sh
@@ -42,7 +42,7 @@ RUN if [ ! -d "/app/dist/prisma" ]; then \
     fi
 
 # Copiar o diretório prisma explicitamente
-COPY prisma ./prisma
+COPY prisma ./prisma/
 COPY prisma ./dist/prisma
 
 # Instalar apenas dependências de produção

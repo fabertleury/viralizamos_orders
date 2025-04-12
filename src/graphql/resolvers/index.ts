@@ -1,174 +1,122 @@
 import { PrismaClient } from '@prisma/client';
 import { GraphQLError } from 'graphql';
+import { DateTimeResolver } from 'graphql-scalars';
+import { orderResolvers } from './order';
 
 const prisma = new PrismaClient();
 
 // Resolvers para o GraphQL
 export const resolvers = {
+  // Scalar resolvers
+  DateTime: DateTimeResolver,
+  
   Query: {
-    // Consultas para ordens
-    orders: async (_: any, args: { limit: number; offset: number; status?: string; search?: string }) => {
-      const { limit = 10, offset = 0, status, search } = args;
-      
-      // Construir filtros
-      const where: any = {};
-      
-      if (status) {
-        where.status = status;
-      }
-      
-      if (search) {
-        where.OR = [
-          { target_username: { contains: search, mode: 'insensitive' } },
-          { transaction_id: { contains: search } }
-        ];
-      }
-      
-      // Buscar ordens e contar total
-      const [orders, count] = await Promise.all([
-        prisma.order.findMany({
-          where,
-          take: limit,
-          skip: offset,
-          orderBy: { created_at: 'desc' }
-        }),
-        prisma.order.count({ where })
-      ]);
-      
-      return {
-        orders,
-        count
-      };
-    },
+    // Manter apenas os resolvers de entidades que ainda existem
+    ...orderResolvers.Query,
     
-    order: async (_: any, args: { id: string }) => {
-      return prisma.order.findUnique({
-        where: { id: args.id }
-      });
+    // Provider resolvers
+    providers: () => {
+      return prisma.provider.findMany();
     },
-    
-    orderLogs: async (_: any, args: { orderId: string }) => {
-      return prisma.orderLog.findMany({
-        where: { order_id: args.orderId },
-        orderBy: { created_at: 'desc' }
-      });
-    },
-    
-    // Consultas para serviços
-    services: async (_: any, args: { providerId?: string }) => {
-      const where = args.providerId ? { provider_id: args.providerId } : {};
-      
-      return prisma.service.findMany({ where });
-    },
-    
-    // Consultas para provedores
-    providers: async () => {
-      return prisma.provider.findMany({
-        orderBy: { name: 'asc' }
-      });
-    },
-    
-    provider: async (_: any, args: { id: string }) => {
+    provider: (_, { id }) => {
       return prisma.provider.findUnique({
-        where: { id: args.id }
+        where: { id }
       });
+    },
+    
+    // User resolvers
+    users: () => {
+      return prisma.user.findMany();
+    },
+    user: (_, { id }) => {
+      return prisma.user.findUnique({
+        where: { id }
+      });
+    },
+    
+    // Health check resolver
+    health: () => {
+      return {
+        status: 'ok',
+        timestamp: new Date().toISOString()
+      };
     }
   },
   
   Mutation: {
-    // Mutações para ordens
-    createOrder: async (_: any, args: {
-      transaction_id: string;
-      service_id: string;
-      target_username: string;
-      quantity: number;
-      attributes?: any;
-    }) => {
-      const { transaction_id, service_id, target_username, quantity, attributes } = args;
-      
-      try {
-        // Verificar se o serviço existe
-        const service = await prisma.service.findUnique({
-          where: { id: service_id }
-        });
-        
-        if (!service) {
-          throw new GraphQLError('Serviço não encontrado');
+    // Manter apenas os resolvers de entidades que ainda existem
+    ...orderResolvers.Mutation,
+    
+    // Log resolvers
+    createOrderLog: async (_, { orderId, level, message, data }) => {
+      const log = await prisma.orderLog.create({
+        data: {
+          order_id: orderId,
+          level,
+          message,
+          data,
         }
-        
-        // Criar a ordem
-        const order = await prisma.order.create({
-          data: {
-            transaction_id,
-            service_id,
-            provider_id: service.provider_id,
-            target_username,
-            quantity: quantity || service.default_quantity || 1,
-            attributes: attributes || {},
-            status: 'pending'
-          }
-        });
-        
-        // Registrar o log
-        await prisma.orderLog.create({
-          data: {
-            order_id: order.id,
-            status: 'pending',
-            notes: 'Pedido criado',
-            metadata: {}
-          }
-        });
-        
-        return order;
-      } catch (error) {
-        console.error('Erro ao criar ordem:', error);
-        throw new GraphQLError('Erro ao criar ordem');
-      }
+      });
+      
+      return log;
     },
     
-    updateOrder: async (_: any, args: {
-      id: string;
-      status?: string;
-      notes?: string;
-    }) => {
-      const { id, status, notes } = args;
+    // Provider resolvers
+    createProvider: async (_, { name, slug, apiUrl, apiKey }) => {
+      const provider = await prisma.provider.create({
+        data: {
+          name,
+          slug,
+          api_url: apiUrl,
+          api_key: apiKey,
+          status: true
+        }
+      });
       
-      try {
-        // Verificar se a ordem existe
-        const existingOrder = await prisma.order.findUnique({
-          where: { id }
-        });
-        
-        if (!existingOrder) {
-          throw new GraphQLError('Ordem não encontrada');
+      return provider;
+    },
+    
+    updateProvider: async (_, { id, name, slug, apiUrl, apiKey, status }) => {
+      const provider = await prisma.provider.update({
+        where: { id },
+        data: {
+          name,
+          slug,
+          api_url: apiUrl,
+          api_key: apiKey,
+          status
         }
-        
-        // Atualizar a ordem
-        const order = await prisma.order.update({
-          where: { id },
-          data: { 
-            status: status || existingOrder.status,
-            updated_at: new Date()
-          }
-        });
-        
-        // Registrar o log
-        if (status) {
-          await prisma.orderLog.create({
-            data: {
-              order_id: id,
-              status: status,
-              notes: notes || `Status atualizado para: ${status}`,
-              metadata: {}
-            }
-          });
+      });
+      
+      return provider;
+    },
+    
+    // Order status update resolver
+    updateOrderStatus: async (_, { id, status, externalId, response }) => {
+      const order = await prisma.order.update({
+        where: { id },
+        data: {
+          status,
+          external_order_id: externalId,
+          provider_response: response
         }
-        
-        return order;
-      } catch (error) {
-        console.error('Erro ao atualizar ordem:', error);
-        throw new GraphQLError('Erro ao atualizar ordem');
-      }
+      });
+      
+      // Log the status update
+      await prisma.orderLog.create({
+        data: {
+          order_id: id,
+          level: 'info',
+          message: `Status updated to ${status}`,
+          data: {
+            previous_status: order.status,
+            new_status: status,
+            external_id: externalId
+          },
+        }
+      });
+      
+      return order;
     }
   }
 };

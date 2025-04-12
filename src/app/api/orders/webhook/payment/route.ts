@@ -193,8 +193,8 @@ export async function POST(request: NextRequest) {
           const order = await prisma.order.create({
             data: {
               transaction_id: body.transaction_id,
-              service_id: body.metadata.service,
               external_service_id: body.metadata.external_service_id,
+              provider_id: user?.id,
               status: 'pending',
               amount: body.amount / postCount, // Dividir o valor total pelo número de posts
               quantity: post.quantity || quantityPerPost,
@@ -202,8 +202,13 @@ export async function POST(request: NextRequest) {
               target_url: post.url || `https://instagram.com/p/${post.code}`,
               customer_name: body.metadata.customer?.name || null,
               customer_email: body.metadata.customer?.email || null,
-              user_id: user?.id || null,
               metadata: {
+                payment_method: 'credit_card',
+                payment_status: 'approved',
+                external_id: body.payment_id,
+                pix_code: '',
+                created_at: new Date().toISOString(),
+                source: 'payment-webhook',
                 post_id: post.id,
                 post_code: post.code,
                 payment_id: body.payment_id,
@@ -242,17 +247,21 @@ export async function POST(request: NextRequest) {
         const order = await prisma.order.create({
           data: {
             transaction_id: body.transaction_id,
-            service_id: body.metadata.service,
             external_service_id: body.metadata.external_service_id,
+            provider_id: user?.id,
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
-            user_id: user?.id || null,
             metadata: {
-              payment_id: body.payment_id,
+              payment_method: 'credit_card',
+              payment_status: 'approved',
+              external_id: body.payment_id,
+              pix_code: '',
+              created_at: new Date().toISOString(),
+              source: 'payment-webhook',
               service_type: 'followers',
               external_service_id: body.metadata.external_service_id
             }
@@ -286,17 +295,21 @@ export async function POST(request: NextRequest) {
         const order = await prisma.order.create({
           data: {
             transaction_id: body.transaction_id,
-            service_id: body.metadata.service,
             external_service_id: body.metadata.external_service_id,
+            provider_id: user?.id,
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
-            user_id: user?.id || null,
             metadata: {
-              payment_id: body.payment_id,
+              payment_method: 'credit_card',
+              payment_status: 'approved',
+              external_id: body.payment_id,
+              pix_code: '',
+              created_at: new Date().toISOString(),
+              source: 'payment-webhook',
               service_type: body.metadata.service_type || 'instagram',
               external_service_id: body.metadata.external_service_id
             }
