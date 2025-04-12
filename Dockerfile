@@ -9,17 +9,21 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=4000
 
-# Copiar todos os arquivos do projeto
-COPY . .
+# Primeiro, copiar apenas package.json e prisma schema para otimizar o cache
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
 
 # Instalar dependências
 RUN npm install
 
+# Gerar Prisma Client explicitamente antes do build
+RUN npx prisma generate
+
+# Agora copiar o resto dos arquivos
+COPY . .
+
 # Instalar cross-env globalmente
 RUN npm install -g cross-env
-
-# Gerar cliente Prisma
-RUN if [ -f "/app/prisma/schema.prisma" ]; then npx prisma generate; fi
 
 # Executar o build do projeto com flag para ignorar erros
 RUN npm run build || echo "Ignorando erros de build para continuar a implantação"
