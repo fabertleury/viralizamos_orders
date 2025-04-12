@@ -1,6 +1,7 @@
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
+import path from 'path';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
@@ -34,6 +35,18 @@ async function startServer() {
   // Configurar middleware
   app.use(cors());
   app.use(express.json());
+  
+  // Servir arquivos estáticos
+  app.use(express.static(path.join(process.cwd(), 'public')));
+  
+  // Rota raiz para healthcheck
+  app.get('/', (_, res) => {
+    res.status(200).json({ 
+      status: 'ok', 
+      service: 'viralizamos-orders-graphql',
+      timestamp: new Date().toISOString() 
+    });
+  });
   
   // Rota de healthcheck explícita (para Railway)
   app.get('/health', (_, res) => {

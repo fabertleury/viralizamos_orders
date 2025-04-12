@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import setupScheduler from '../../../lib/init-scheduler';
 
@@ -18,11 +18,29 @@ try {
   schedulerStatus = 'error';
 }
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+/**
+ * Endpoint de healthcheck para monitoramento
+ * Usado pelo Railway e outros serviços para verificar se a API está funcionando
+ */
+export async function GET(request: NextRequest) {
+  console.log('Health check requisitado:', request.url);
+  
+  return NextResponse.json({
+    status: 'ok',
+    service: 'viralizamos-orders-api',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  }, { status: 200 });
+}
+
 /**
  * Endpoint de verificação de saúde do serviço de orders
  * Retorna status e informações sobre o serviço
  */
-export async function GET() {
+export async function GET_old() {
   try {
     // Verificar conexão com o banco de dados
     const dbStatus = await checkDatabaseConnection();
