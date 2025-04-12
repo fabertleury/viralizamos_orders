@@ -15,12 +15,17 @@ COPY package*.json ./
 # Instalar dependências
 RUN npm install
 
-# Copiar arquivos essenciais
-COPY complete-server.js ./
+# Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/
 
-# Tentar gerar o Prisma Client
-RUN npx prisma generate || echo "Ignorando erro de geração do Prisma Client"
+# Criar diretório para o output do Prisma Client
+RUN mkdir -p node_modules/.prisma/client
+
+# Gerar o Prisma Client
+RUN npx prisma generate
+
+# Copiar o servidor completo
+COPY complete-server.js ./
 
 # Copiar o restante dos arquivos
 COPY . .
