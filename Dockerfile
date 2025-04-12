@@ -17,6 +17,9 @@ FROM node:18-alpine AS runner
 
 WORKDIR /app
 
+# Instalar ferramentas básicas para debug
+RUN apk add --no-cache curl busybox-extras
+
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
@@ -38,5 +41,9 @@ COPY prisma ./prisma
 COPY prisma ./dist/prisma
 
 EXPOSE 4000
+
+# Health check básico
+HEALTHCHECK --interval=5s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:4000/health || exit 1
 
 CMD ["./start.sh"] 

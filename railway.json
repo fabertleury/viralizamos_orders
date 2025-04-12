@@ -10,7 +10,7 @@
     "restartPolicyMaxRetries": 10,
     "startCommand": "./start.sh",
     "sleepApplication": false,
-    "healthcheckPath": "/",
+    "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "healthcheckInterval": 10
   }
