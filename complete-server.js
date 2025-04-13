@@ -276,6 +276,36 @@ app.post('/api/orders/create', async (req, res) => {
       }
     }
     
+    // Buscar ou criar usuário com base no email
+    let userId = null;
+    
+    if (orderData.customer_email) {
+      // Verificar se o usuário já existe pelo email
+      const existingUser = await prisma.user.findFirst({
+        where: { email: orderData.customer_email }
+      });
+      
+      if (existingUser) {
+        console.log(`Usuário existente encontrado com email ${orderData.customer_email}, ID: ${existingUser.id}`);
+        userId = existingUser.id;
+      } else {
+        // Criar novo usuário
+        console.log(`Criando novo usuário com email ${orderData.customer_email}`);
+        
+        const newUser = await prisma.user.create({
+          data: {
+            email: orderData.customer_email,
+            name: orderData.customer_name || 'Cliente',
+            phone: orderData.customer_phone || null,
+            role: 'customer'
+          }
+        });
+        
+        console.log(`Novo usuário criado com ID: ${newUser.id}`);
+        userId = newUser.id;
+      }
+    }
+    
     // Buscar informações do serviço e provedor se não estiverem disponíveis
     let providerInfo = null;
     let externalServiceId = orderData.external_service_id;
@@ -336,6 +366,7 @@ app.post('/api/orders/create', async (req, res) => {
             target_url: post.url || postData.post_url || orderData.target_url || '',
             customer_name: orderData.customer_name || '',
             customer_email: orderData.customer_email || '',
+            user_id: userId, // Vincular ao usuário
             metadata: {
               post: postInfo,
               payment: paymentData,
@@ -345,6 +376,10 @@ app.post('/api/orders/create', async (req, res) => {
                 name: providerInfo.name,
                 provider_name: providerInfo.name,
                 provider_slug: providerInfo.slug
+              } : undefined,
+              user_info: userId ? {
+                user_id: userId,
+                email: orderData.customer_email
               } : undefined
             }
           }
@@ -360,7 +395,8 @@ app.post('/api/orders/create', async (req, res) => {
               source: 'api', 
               method: 'POST /api/orders/create',
               provider_id: providerId,
-              external_service_id: externalServiceId
+              external_service_id: externalServiceId,
+              user_id: userId
             }
           }
         });
@@ -397,6 +433,7 @@ app.post('/api/orders/create', async (req, res) => {
           target_url: postData.post_url || orderData.target_url || '',
           customer_name: orderData.customer_name || '',
           customer_email: orderData.customer_email || '',
+          user_id: userId, // Vincular ao usuário
           metadata: {
             post: postInfo,
             payment: paymentData,
@@ -407,6 +444,10 @@ app.post('/api/orders/create', async (req, res) => {
               name: providerInfo.name,
               provider_name: providerInfo.name,
               provider_slug: providerInfo.slug
+            } : undefined,
+            user_info: userId ? {
+              user_id: userId,
+              email: orderData.customer_email
             } : undefined
           }
         }
@@ -422,7 +463,8 @@ app.post('/api/orders/create', async (req, res) => {
             source: 'api', 
             method: 'POST /api/orders/create',
             provider_id: providerId,
-            external_service_id: externalServiceId
+            external_service_id: externalServiceId,
+            user_id: userId
           }
         }
       });
@@ -514,6 +556,57 @@ app.get('/api/orders/by-transaction/:transactionId', async (req, res) => {
   }
 });
 
+// Rota para buscar pedidos por email do usuário
+app.post('/api/orders/by-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email não fornecido'
+      });
+    }
+    
+    console.log(`Buscando pedidos para o email: ${email}`);
+    
+    // Primeiro verificar se o usuário existe
+    const user = await prisma.user.findFirst({
+      where: { email }
+    });
+    
+    // Se não encontrar usuário pelo ID no sistema, buscar pedidos pelo email
+    const orders = await prisma.order.findMany({
+      where: user 
+        ? { user_id: user.id } 
+        : { customer_email: email },
+      include: {
+        logs: {
+          orderBy: { created_at: 'desc' },
+          take: 5
+        }
+      },
+      orderBy: { created_at: 'desc' }
+    });
+    
+    console.log(`Encontrados ${orders.length} pedidos para o email ${email}`);
+    
+    return res.status(200).json({
+      success: true,
+      user: user,
+      count: orders.length,
+      orders
+    });
+    
+  } catch (error) {
+    console.error('Erro ao buscar pedidos por email:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Erro interno: ${error.message}`
+    });
+  }
+});
+
 // Rota raiz para informações da API
 app.get(['/', '/api'], (req, res) => {
   res.status(200).json({
@@ -527,7 +620,8 @@ app.get(['/', '/api'], (req, res) => {
       { path: '/api/orders/:id', method: 'GET', description: 'Consultar status de um pedido' },
       { path: '/api/orders/by-transaction/:transactionId', method: 'GET', description: 'Consultar pedidos por transaction_id' },
       { path: '/api/orders/:id/process', method: 'POST', description: 'Processar um pedido específico (enviar ao provedor)' },
-      { path: '/api/orders/process-by-transaction/:transactionId', method: 'POST', description: 'Processar todos os pedidos pendentes de uma transação' }
+      { path: '/api/orders/process-by-transaction/:transactionId', method: 'POST', description: 'Processar todos os pedidos pendentes de uma transação' },
+      { path: '/api/orders/by-email', method: 'POST', description: 'Consultar pedidos por email do usuário' }
     ]
   });
 });
