@@ -7,22 +7,31 @@ echo "PORT: ${PORT:-4000}"
 echo "NODE_ENV: ${NODE_ENV:-development}"
 echo "DATABASE_URL: ${DATABASE_URL:-não definido}"
 
+# Definir explicitamente NODE_ENV=production
+export NODE_ENV=production
+
+# Executar o SQL personalizado para remover Service model
+if [ -f "/app/prisma/remove_service_model.sql" ]; then
+  echo "🔄 Aplicando correções no banco de dados..."
+  npx prisma db execute --file /app/prisma/remove_service_model.sql --schema /app/prisma/schema.prisma || echo "⚠️ Falha ao aplicar correções no banco de dados"
+fi
+
 # Verificar se o servidor completo existe
 if [ -f "/app/complete-server.js" ]; then
   # Iniciar o servidor completo diretamente
   echo "🚀 Iniciando servidor completo..."
-  NODE_ENV=production exec node /app/complete-server.js
+  exec node /app/complete-server.js
 else
   echo "⚠️ Servidor completo não encontrado, procurando alternativas..."
 
   # Verificar outras opções
   if [ -f "/app/basic-server.js" ]; then
     echo "🔄 Iniciando servidor básico como fallback..."
-    NODE_ENV=production exec node /app/basic-server.js
+    exec node /app/basic-server.js
   else
     echo "❌ Nenhum servidor encontrado! Criando servidor básico inline..."
     # Criar e executar um servidor básico inline
-    NODE_ENV=production exec node -e '
+    exec node -e '
       const http = require("http");
       const PORT = process.env.PORT || 4000;
       

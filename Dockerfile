@@ -54,8 +54,13 @@ RUN if [ ! -f node_modules/.prisma/client/runtime/libquery_engine-linux-musl-ope
 # Copiar diretório source
 COPY src ./src/
 
-# Copiar o arquivo modificado que suporta GraphQL
+# Copiar os arquivos de servidor
+COPY complete-server.js ./
 COPY modified-server.js ./
+
+# Copiar script de inicialização
+COPY start-prod.sh ./
+RUN chmod +x ./start-prod.sh
 
 # Copiar o restante dos arquivos
 COPY . .
@@ -66,5 +71,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 EXPOSE 4000
 
-# Iniciar o servidor modificado que suporta GraphQL
-CMD ["node", "modified-server.js"] 
+# Iniciar com nosso script de inicialização
+CMD ["./start-prod.sh"] 
