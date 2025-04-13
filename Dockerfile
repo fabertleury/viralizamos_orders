@@ -66,15 +66,37 @@ COPY src ./src/
 COPY complete-server.js ./
 COPY modified-server.js ./
 
-# Copiar script de inicialização
-COPY start.sh ./
-RUN chmod +x ./start.sh
+# Criar o script de inicialização diretamente
+RUN echo '#!/bin/sh' > start.sh \
+    && echo '' >> start.sh \
+    && echo 'echo "=== STARTING VIRALIZAMOS ORDERS SERVICE ==="' >> start.sh \
+    && echo '' >> start.sh \
+    && echo '# Verificar ambiente' >> start.sh \
+    && echo 'echo "📋 Verificando ambiente:"' >> start.sh \
+    && echo 'echo "- Diretório atual: $(pwd)"' >> start.sh \
+    && echo 'echo "- Arquivos: $(ls -la)"' >> start.sh \
+    && echo '' >> start.sh \
+    && echo '# Verificar se o servidor completo existe e iniciar' >> start.sh \
+    && echo 'if [ -f "./complete-server.js" ]; then' >> start.sh \
+    && echo '  echo "🚀 Iniciando servidor completo..."' >> start.sh \
+    && echo '  exec node ./complete-server.js' >> start.sh \
+    && echo 'else' >> start.sh \
+    && echo '  echo "⚠️ Servidor completo não encontrado!"' >> start.sh \
+    && echo '  echo "❌ Iniciando servidor de emergência..."' >> start.sh \
+    && echo '  exec node -e "const http = require(\"http\"); const PORT = process.env.PORT || 4000; const server = http.createServer((req, res) => { res.writeHead(200, { \"Content-Type\": \"application/json\" }); res.end(JSON.stringify({ status: \"ok\", message: \"Emergency server running\" })); }); server.listen(PORT, () => console.log(\"Server running on port \"+PORT));"' >> start.sh \
+    && echo 'fi' >> start.sh
+
+# Garantir que o script tenha permissões de execução
+RUN chmod +x ./start.sh && ls -la start.sh
 
 # Verificar a existência e conteúdo do arquivo .env
 RUN echo "Verificando arquivo .env:" && ls -la .env* && cat .env | grep -v "KEY\|SECRET\|PASSWORD"
 
 # Copiar o restante dos arquivos
 COPY . .
+
+# Garantir novamente que o script tenha permissões de execução
+RUN chmod 755 ./start.sh && ls -la start.sh
 
 # Health check básico
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
@@ -83,4 +105,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 EXPOSE 4000
 
 # Iniciar com nosso script de inicialização
-CMD ["./start.sh"] 
+CMD ["sh", "./start.sh"] 
