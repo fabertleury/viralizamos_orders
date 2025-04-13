@@ -59,8 +59,12 @@ COPY complete-server.js ./
 COPY modified-server.js ./
 
 # Copiar script de inicialização
-COPY start-prod.sh ./
-RUN chmod +x ./start-prod.sh
+COPY start.sh ./
+RUN chmod +x ./start.sh
+
+# Copiar arquivos de ambiente
+COPY .env.railway ./
+COPY .env ./
 
 # Copiar o restante dos arquivos
 COPY . .
@@ -72,4 +76,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 EXPOSE 4000
 
 # Iniciar com nosso script de inicialização
-CMD ["./start-prod.sh"] 
+CMD ["./start.sh"] 

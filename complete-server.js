@@ -13,6 +13,9 @@ const prisma = new PrismaClient();
 // Configurar cliente Supabase para buscar informações de serviços
 let supabaseClient = null;
 
+// Cache para rastrear posts por transação
+const transactionPostsCache = new Map();
+
 // Função para criar o cliente Supabase
 function getSupabaseClient() {
   if (supabaseClient) return supabaseClient;
@@ -77,6 +80,53 @@ async function fetchServiceInfo(serviceId) {
     };
   } catch (error) {
     console.error('Erro ao buscar informações do serviço:', error);
+    return null;
+  }
+}
+
+// Após a função fetchServiceInfo, adicionar função para buscar provedor pelo service_id no banco local
+
+/**
+ * Buscar provedor associado a um serviço pelo ID diretamente no banco local
+ * Esta é uma função alternativa quando o Supabase falha
+ */
+async function getProviderByServiceId(serviceId) {
+  try {
+    console.log(`[Fallback] Buscando provedor para serviço ${serviceId} no banco local...`);
+    
+    // Buscar service e provider através de um pedido existente para este serviço
+    const existingOrder = await prisma.order.findFirst({
+      where: {
+        service_id: serviceId,
+        provider_id: { not: null }
+      },
+      select: {
+        provider_id: true,
+        external_service_id: true
+      }
+    });
+    
+    if (existingOrder && existingOrder.provider_id) {
+      console.log(`[Fallback] Encontrado provedor ${existingOrder.provider_id} de pedido existente`);
+      
+      // Buscar detalhes completos do provedor
+      const provider = await prisma.provider.findUnique({
+        where: { id: existingOrder.provider_id }
+      });
+      
+      if (provider) {
+        return {
+          provider_id: provider.id,
+          external_service_id: existingOrder.external_service_id,
+          provider: provider
+        };
+      }
+    }
+    
+    console.log('[Fallback] Nenhum provedor encontrado para este serviço no banco local');
+    return null;
+  } catch (error) {
+    console.error('[Fallback] Erro ao buscar provedor no banco local:', error);
     return null;
   }
 }
@@ -240,6 +290,64 @@ async function sendOrderToProvider(order) {
   }
 }
 
+// Função para rastrear posts recebidos em cada transação
+function trackPostForTransaction(transactionId, postIdentifier) {
+  if (!transactionId || !postIdentifier) return;
+  
+  // Obter ou criar conjunto de posts para esta transação
+  let transactionPosts = transactionPostsCache.get(transactionId);
+  if (!transactionPosts) {
+    transactionPosts = new Set();
+    transactionPostsCache.set(transactionId, transactionPosts);
+  }
+  
+  // Adicionar este post ao conjunto
+  transactionPosts.add(postIdentifier);
+  
+  // Exibir status atual
+  console.log(`[RASTREAMENTO] Transação ${transactionId} agora tem ${transactionPosts.size} posts rastreados: ${Array.from(transactionPosts).join(', ')}`);
+}
+
+// Função para obter estatísticas de uma transação
+function getTransactionStats(transactionId) {
+  if (!transactionId) return null;
+  
+  const transactionPosts = transactionPostsCache.get(transactionId);
+  if (!transactionPosts) {
+    return { postsCount: 0, posts: [] };
+  }
+  
+  return {
+    postsCount: transactionPosts.size,
+    posts: Array.from(transactionPosts)
+  };
+}
+
+// Função para limpar o cache periodicamente
+setInterval(() => {
+  console.log(`[MANUTENÇÃO] Limpando cache de rastreamento de transações...`);
+  const now = Date.now();
+  const ONE_HOUR = 60 * 60 * 1000;
+  
+  // Remover transações com mais de 1 hora
+  let cleaned = 0;
+  transactionPostsCache.forEach((_, key) => {
+    // Extrair timestamp do ID se possível
+    const timestampMatch = key.match(/tx-(\d+)/);
+    if (timestampMatch) {
+      const timestamp = parseInt(timestampMatch[1]);
+      if (now - timestamp > ONE_HOUR) {
+        transactionPostsCache.delete(key);
+        cleaned++;
+      }
+    }
+  });
+  
+  if (cleaned > 0) {
+    console.log(`[MANUTENÇÃO] ${cleaned} transações antigas removidas do cache.`);
+  }
+}, 30 * 60 * 1000); // Executar a cada 30 minutos
+
 // Rota para criar pedidos
 app.post('/api/orders/create', async (req, res) => {
   console.log('Recebido pedido para criar ordem:', JSON.stringify(req.body, null, 2));
@@ -252,14 +360,41 @@ app.post('/api/orders/create', async (req, res) => {
       return res.status(400).json({ error: 'Dados de ordem não fornecidos' });
     }
     
+    // Identificar a transação para rastreamento
+    const transactionId = orderData.transaction_id || `tx-${Date.now()}`;
+    
+    // Identificar o post específico desta requisição
+    let postIdentifier = 'unknown';
+    if (orderData.post_data && orderData.post_data.post_code) {
+      postIdentifier = orderData.post_data.post_code;
+    } else if (orderData.target_url) {
+      // Extrair código do post da URL se possível
+      const codeMatch = orderData.target_url.match(/\/p\/([^/]+)/);
+      if (codeMatch) {
+        postIdentifier = codeMatch[1];
+      } else {
+        postIdentifier = orderData.target_url;
+      }
+    } else if (orderData.external_order_id) {
+      postIdentifier = orderData.external_order_id;
+    }
+    
+    // Rastrear este post para a transação
+    trackPostForTransaction(transactionId, postIdentifier);
+    
+    // Obter estatísticas atuais desta transação
+    const transactionStats = getTransactionStats(transactionId);
+    console.log(`[ESTATÍSTICAS] Transação ${transactionId} tem ${transactionStats.postsCount} posts até agora.`);
+    
     console.log('Processando dados de ordem:', JSON.stringify(orderData, null, 2));
     
     // Verificar se o transaction_id existe para evitar duplicidade
     if (orderData.transaction_id) {
       console.log(`Verificando se já existe pedido com transaction_id: ${orderData.transaction_id}`);
       
-      // Verificar se já existe pedido com o mesmo external_order_id (exato)
+      // Verificar se este post específico já foi processado
       if (orderData.external_order_id) {
+        // Verificar pelo external_order_id (mais específico)
         const existingExactOrder = await prisma.order.findFirst({
           where: { external_order_id: orderData.external_order_id }
         });
@@ -273,7 +408,49 @@ app.post('/api/orders/create', async (req, res) => {
             is_duplicate: true
           });
         }
+      } else if (orderData.post_data && orderData.post_data.post_code) {
+        // Verificar pela combinação de transaction_id e post_code
+        const existingPostInTransaction = await prisma.order.findFirst({
+          where: { 
+            transaction_id: orderData.transaction_id,
+            metadata: {
+              path: ['post', 'post_code'],
+              equals: orderData.post_data.post_code
+            }
+          }
+        });
+        
+        if (existingPostInTransaction) {
+          console.log(`Post ${orderData.post_data.post_code} já foi processado para esta transação. ID: ${existingPostInTransaction.id}`);
+          return res.status(200).json({ 
+            success: true, 
+            message: 'Post já processado para esta transação',
+            order: existingPostInTransaction,
+            is_duplicate: true
+          });
+        }
+      } else if (orderData.target_url) {
+        // Verificar pela combinação de transaction_id e target_url
+        const existingUrlInTransaction = await prisma.order.findFirst({
+          where: { 
+            transaction_id: orderData.transaction_id,
+            target_url: orderData.target_url
+          }
+        });
+        
+        if (existingUrlInTransaction) {
+          console.log(`URL ${orderData.target_url} já foi processada para esta transação. ID: ${existingUrlInTransaction.id}`);
+          return res.status(200).json({ 
+            success: true, 
+            message: 'URL já processada para esta transação',
+            order: existingUrlInTransaction,
+            is_duplicate: true
+          });
+        }
       }
+      
+      // Se chegou aqui, este post ainda não foi processado para esta transação
+      console.log(`Nenhum pedido duplicado encontrado para este post na transação ${orderData.transaction_id}`);
     }
     
     // Buscar ou criar usuário com base no email
@@ -315,25 +492,85 @@ app.post('/api/orders/create', async (req, res) => {
     if (orderData.service_id && (!providerId || !externalServiceId)) {
       console.log(`Buscando informações complementares para o serviço ${orderData.service_id}`);
       
-      const serviceInfo = await fetchServiceInfo(orderData.service_id);
-      if (serviceInfo) {
-        providerInfo = serviceInfo.provider;
-        
-        if (!providerId && providerInfo) {
-          providerId = providerInfo.id;
-          console.log(`Provider ID obtido do Supabase: ${providerId}`);
+      let foundServiceInfo = false;
+      
+      // Primeiro tentar no Supabase
+      try {
+        const serviceInfo = await fetchServiceInfo(orderData.service_id);
+        if (serviceInfo) {
+          foundServiceInfo = true;
+          providerInfo = serviceInfo.provider;
+          
+          if (!providerId && providerInfo) {
+            providerId = providerInfo.id;
+            console.log(`Provider ID obtido do Supabase: ${providerId}`);
+          }
+          
+          if (!externalServiceId) {
+            externalServiceId = serviceInfo.external_service_id;
+            console.log(`External Service ID obtido do Supabase: ${externalServiceId}`);
+          }
         }
+      } catch (error) {
+        console.error(`Erro ao buscar informações do serviço no Supabase: ${error.message}`);
+        // Continuar e tentar o método fallback
+      }
+      
+      // Se não conseguiu no Supabase, tentar no banco local
+      if (!foundServiceInfo) {
+        console.log('Tentando buscar informações no banco de dados local como fallback...');
         
-        if (!externalServiceId) {
-          externalServiceId = serviceInfo.external_service_id;
-          console.log(`External Service ID obtido do Supabase: ${externalServiceId}`);
+        const fallbackInfo = await getProviderByServiceId(orderData.service_id);
+        if (fallbackInfo) {
+          foundServiceInfo = true;
+          
+          if (!providerId) {
+            providerId = fallbackInfo.provider_id;
+            console.log(`Provider ID obtido do banco local: ${providerId}`);
+          }
+          
+          if (!externalServiceId) {
+            externalServiceId = fallbackInfo.external_service_id;
+            console.log(`External Service ID obtido do banco local: ${externalServiceId}`);
+          }
+          
+          providerInfo = fallbackInfo.provider;
         }
+      }
+      
+      // Se não encontrou nada, registrar alerta
+      if (!foundServiceInfo) {
+        console.warn(`⚠️ ALERTA: Não foi possível obter informações para o serviço ${orderData.service_id}`);
+        console.warn('O pedido será salvo, mas não poderá ser enviado ao provedor sem essas informações');
       }
     }
     
     // Extrair informações do post_data, se disponível
     const postData = orderData.post_data || {};
     const paymentData = orderData.payment_data || {};
+    
+    // Converter quantidade para inteiro
+    let quantity = 0;
+    if (orderData.quantity) {
+      // Converter para número primeiro, garantir que é positivo, e então arredondar para o inteiro mais próximo
+      // Se for uma string ou outro tipo de dado, Number() tentará converter
+      const numQuantity = Number(orderData.quantity);
+      
+      // Verificar se é um número válido
+      if (!isNaN(numQuantity)) {
+        // Arredondar para o inteiro mais próximo e garantir que seja positivo
+        quantity = Math.max(1, Math.round(Math.abs(numQuantity)));
+      } else {
+        // Se não for um número válido, usar 1 como valor padrão
+        quantity = 1;
+      }
+      
+      console.log(`Quantidade original: ${orderData.quantity}, convertida para: ${quantity}`);
+    } else {
+      // Se não tiver quantidade definida, usar 1 como padrão
+      quantity = 1;
+      console.log(`Quantidade não definida, usando valor padrão: ${quantity}`);
+    }
     
     // Se houver múltiplos posts, criar uma ordem para cada um
     if (orderData.posts && Array.isArray(orderData.posts) && orderData.posts.length > 0) {
@@ -361,7 +598,7 @@ app.post('/api/orders/create', async (req, res) => {
             provider_id: providerId,
             status: 'pending',
             amount: orderData.amount || 0,
-            quantity: orderData.quantity || 0,
+            quantity: quantity,
             target_username: orderData.target_username || '',
             target_url: post.url || postData.post_url || orderData.target_url || '',
             customer_name: orderData.customer_name || '',
@@ -370,6 +607,7 @@ app.post('/api/orders/create', async (req, res) => {
             metadata: {
               post: postInfo,
               payment: paymentData,
+              original_quantity: orderData.quantity, // Salvar o valor original para referência
               external_payment_id: orderData.external_payment_id,
               external_transaction_id: orderData.external_transaction_id,
               service_info: providerInfo ? {
@@ -428,7 +666,7 @@ app.post('/api/orders/create', async (req, res) => {
           provider_id: providerId,
           status: 'pending',
           amount: orderData.amount || 0,
-          quantity: orderData.quantity || 0,
+          quantity: quantity,
           target_username: orderData.target_username || '',
           target_url: postData.post_url || orderData.target_url || '',
           customer_name: orderData.customer_name || '',
@@ -437,6 +675,7 @@ app.post('/api/orders/create', async (req, res) => {
           metadata: {
             post: postInfo,
             payment: paymentData,
+            original_quantity: orderData.quantity, // Salvar o valor original para referência
             external_payment_id: orderData.external_payment_id,
             external_transaction_id: orderData.external_transaction_id,
             transaction_id: orderData.transaction_id, // Duplicar para facilitar consultas
@@ -475,6 +714,270 @@ app.post('/api/orders/create', async (req, res) => {
   } catch (error) {
     console.error('Erro ao criar ordem:', error);
     return res.status(500).json({ error: 'Erro ao processar a ordem', details: error.message });
+  }
+});
+
+// Após a rota de criar pedidos individuais, adicionar uma rota para processar múltiplos posts em lote
+app.post('/api/orders/batch', async (req, res) => {
+  console.log('Recebido pedido em lote:', JSON.stringify(req.body, null, 2));
+  
+  try {
+    // Verificar formato da requisição - pode vir como { order: {...} } ou diretamente {...}
+    const orderData = req.body.order || req.body;
+    
+    if (!orderData) {
+      return res.status(400).json({ error: 'Dados de ordem não fornecidos' });
+    }
+    
+    // Verificar se existe o array de posts
+    if (!orderData.posts || !Array.isArray(orderData.posts) || orderData.posts.length === 0) {
+      return res.status(400).json({ error: 'Array de posts não fornecido ou vazio' });
+    }
+    
+    // Identificar a transação para rastreamento
+    const transactionId = orderData.transaction_id || `tx-${Date.now()}`;
+    console.log(`Processando lote com ${orderData.posts.length} posts para transação ${transactionId}`);
+    
+    // Buscar ou criar usuário com base no email
+    let userId = null;
+    
+    if (orderData.customer_email) {
+      // Verificar se o usuário já existe pelo email
+      const existingUser = await prisma.user.findFirst({
+        where: { email: orderData.customer_email }
+      });
+      
+      if (existingUser) {
+        console.log(`Usuário existente encontrado com email ${orderData.customer_email}, ID: ${existingUser.id}`);
+        userId = existingUser.id;
+      } else {
+        // Criar novo usuário
+        console.log(`Criando novo usuário com email ${orderData.customer_email}`);
+        
+        const newUser = await prisma.user.create({
+          data: {
+            email: orderData.customer_email,
+            name: orderData.customer_name || 'Cliente',
+            phone: orderData.customer_phone || null,
+            role: 'customer'
+          }
+        });
+        
+        console.log(`Novo usuário criado com ID: ${newUser.id}`);
+        userId = newUser.id;
+      }
+    }
+    
+    // Buscar informações do serviço e provedor se não estiverem disponíveis
+    let providerInfo = null;
+    let externalServiceId = orderData.external_service_id;
+    let providerId = orderData.provider_id;
+    
+    // Se temos service_id mas falta provider_id ou external_service_id, buscar no Supabase
+    if (orderData.service_id && (!providerId || !externalServiceId)) {
+      console.log(`Buscando informações complementares para o serviço ${orderData.service_id}`);
+      
+      let foundServiceInfo = false;
+      
+      // Primeiro tentar no Supabase
+      try {
+        const serviceInfo = await fetchServiceInfo(orderData.service_id);
+        if (serviceInfo) {
+          foundServiceInfo = true;
+          providerInfo = serviceInfo.provider;
+          
+          if (!providerId && providerInfo) {
+            providerId = providerInfo.id;
+            console.log(`Provider ID obtido do Supabase: ${providerId}`);
+          }
+          
+          if (!externalServiceId) {
+            externalServiceId = serviceInfo.external_service_id;
+            console.log(`External Service ID obtido do Supabase: ${externalServiceId}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Erro ao buscar informações do serviço no Supabase: ${error.message}`);
+      }
+      
+      // Se não conseguiu no Supabase, tentar no banco local
+      if (!foundServiceInfo) {
+        console.log('Tentando buscar informações no banco de dados local como fallback...');
+        
+        const fallbackInfo = await getProviderByServiceId(orderData.service_id);
+        if (fallbackInfo) {
+          foundServiceInfo = true;
+          
+          if (!providerId) {
+            providerId = fallbackInfo.provider_id;
+            console.log(`Provider ID obtido do banco local: ${providerId}`);
+          }
+          
+          if (!externalServiceId) {
+            externalServiceId = fallbackInfo.external_service_id;
+            console.log(`External Service ID obtido do banco local: ${externalServiceId}`);
+          }
+          
+          providerInfo = fallbackInfo.provider;
+        }
+      }
+    }
+    
+    // Calcular a quantidade total e por post
+    let totalQuantity = orderData.quantity || orderData.total_quantity || 0;
+    const postsCount = orderData.posts.length;
+    
+    // Verificar se o número é válido
+    if (isNaN(totalQuantity)) {
+      totalQuantity = 0;
+    }
+    
+    // Calcular quantidade média por post (arredondada para inteiro)
+    let baseQuantityPerPost = Math.floor(totalQuantity / postsCount);
+    let remainingQuantity = totalQuantity - (baseQuantityPerPost * postsCount);
+    
+    console.log(`Quantidade total: ${totalQuantity}, Posts: ${postsCount}, Base por post: ${baseQuantityPerPost}, Restante: ${remainingQuantity}`);
+    
+    // Array para armazenar os pedidos criados
+    const createdOrders = [];
+    
+    // Processar cada post
+    for (let i = 0; i < orderData.posts.length; i++) {
+      const post = orderData.posts[i];
+      
+      // Gerar um external_order_id único para cada post
+      const postExternalOrderId = `batch_${transactionId}_${i}_${Date.now()}`;
+      
+      // Calcular a quantidade para este post (distribuindo o restante nos primeiros posts)
+      let postQuantity = baseQuantityPerPost;
+      if (remainingQuantity > 0) {
+        postQuantity++;
+        remainingQuantity--;
+      }
+      
+      // Garantir que a quantidade é um inteiro positivo
+      postQuantity = Math.max(1, Math.round(postQuantity));
+      
+      // Extrair código do post
+      const postCode = post.code || post.post_code;
+      const postUrl = post.url || post.post_url || (postCode ? `https://instagram.com/p/${postCode}/` : null);
+      
+      // Rastrear este post para a transação
+      if (postCode) {
+        trackPostForTransaction(transactionId, postCode);
+      }
+      
+      // Verificar se já existe um pedido para este post na transação
+      if (postCode) {
+        const existingPost = await prisma.order.findFirst({
+          where: { 
+            transaction_id: transactionId,
+            metadata: {
+              path: ['post', 'post_code'],
+              equals: postCode
+            }
+          }
+        });
+        
+        if (existingPost) {
+          console.log(`Post ${postCode} já existe para esta transação. Ignorando.`);
+          createdOrders.push({
+            ...existingPost,
+            is_duplicate: true
+          });
+          continue;
+        }
+      }
+      
+      // Preparar dados do post para salvar como metadata
+      const postInfo = {
+        post_id: post.id,
+        post_url: postUrl,
+        post_type: post.type || 'post',
+        post_code: postCode,
+        is_reel: post.is_reel || false,
+        index: i,
+        total_posts: postsCount
+      };
+      
+      console.log(`Criando pedido para post ${i+1}/${postsCount}: ${postCode || 'Sem código'}`);
+      
+      // Criar pedido para este post
+      const createdOrder = await prisma.order.create({
+        data: {
+          transaction_id: transactionId,
+          service_id: orderData.service_id,
+          external_service_id: externalServiceId,
+          external_order_id: postExternalOrderId,
+          provider_id: providerId,
+          status: 'pending',
+          amount: (orderData.amount || 0) / postsCount, // Dividir o valor total
+          quantity: postQuantity,
+          target_username: orderData.target_username || post.username || '',
+          target_url: postUrl || '',
+          customer_name: orderData.customer_name || '',
+          customer_email: orderData.customer_email || '',
+          user_id: userId,
+          metadata: {
+            post: postInfo,
+            payment: orderData.payment_data || {},
+            batch_info: {
+              total_posts: postsCount,
+              post_index: i,
+              original_quantity: post.quantity || post.calculated_quantity,
+              total_quantity: totalQuantity
+            },
+            external_payment_id: orderData.external_payment_id,
+            external_transaction_id: orderData.external_transaction_id,
+            service_info: providerInfo ? {
+              name: providerInfo.name,
+              provider_name: providerInfo.name,
+              provider_slug: providerInfo.slug
+            } : undefined,
+            user_info: userId ? {
+              user_id: userId,
+              email: orderData.customer_email
+            } : undefined
+          }
+        }
+      });
+      
+      // Criar log da ordem
+      await prisma.orderLog.create({
+        data: {
+          order_id: createdOrder.id,
+          message: `Ordem criada com sucesso (lote ${i+1}/${postsCount})`,
+          level: 'info',
+          data: { 
+            source: 'batch_api', 
+            method: 'POST /api/orders/batch',
+            provider_id: providerId,
+            external_service_id: externalServiceId,
+            user_id: userId,
+            post_code: postCode
+          }
+        }
+      });
+      
+      createdOrders.push(createdOrder);
+      console.log(`Ordem criada com ID: ${createdOrder.id} para post ${postCode || 'Sem código'}`);
+    }
+    
+    // Retornar os pedidos criados
+    return res.status(201).json({
+      success: true,
+      transaction_id: transactionId,
+      count: createdOrders.length,
+      total_quantity: totalQuantity,
+      orders: createdOrders
+    });
+    
+  } catch (error) {
+    console.error('Erro ao processar lote de pedidos:', error);
+    return res.status(500).json({ 
+      error: 'Erro ao processar lote de pedidos', 
+      details: error.message 
+    });
   }
 });
 
@@ -607,6 +1110,52 @@ app.post('/api/orders/by-email', async (req, res) => {
   }
 });
 
+// Rota para verificar estatísticas de uma transação (para debug)
+app.get('/api/debug/transaction/:transactionId', async (req, res) => {
+  try {
+    const transactionId = req.params.transactionId;
+    
+    if (!transactionId) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID da transação não fornecido'
+      });
+    }
+    
+    // Buscar estatísticas de rastreamento da transação
+    const stats = getTransactionStats(transactionId);
+    
+    // Buscar pedidos da transação no banco
+    const orders = await prisma.order.findMany({
+      where: { transaction_id: transactionId },
+      select: {
+        id: true,
+        external_order_id: true,
+        status: true,
+        target_url: true,
+        created_at: true,
+        metadata: true
+      },
+      orderBy: { created_at: 'desc' }
+    });
+    
+    return res.status(200).json({
+      success: true,
+      transaction_id: transactionId,
+      tracking_stats: stats,
+      orders_count: orders.length,
+      orders
+    });
+    
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas da transação:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Erro interno: ${error.message}`
+    });
+  }
+});
+
 // Rota raiz para informações da API
 app.get(['/', '/api'], (req, res) => {
   res.status(200).json({
@@ -616,12 +1165,14 @@ app.get(['/', '/api'], (req, res) => {
     timestamp: new Date().toISOString(),
     endpoints: [
       { path: '/health', method: 'GET', description: 'Verificação de saúde' },
-      { path: '/api/orders/create', method: 'POST', description: 'Criar novos pedidos' },
+      { path: '/api/orders/create', method: 'POST', description: 'Criar pedido individual' },
+      { path: '/api/orders/batch', method: 'POST', description: 'Criar múltiplos pedidos de uma transação (array de posts)' },
       { path: '/api/orders/:id', method: 'GET', description: 'Consultar status de um pedido' },
       { path: '/api/orders/by-transaction/:transactionId', method: 'GET', description: 'Consultar pedidos por transaction_id' },
       { path: '/api/orders/:id/process', method: 'POST', description: 'Processar um pedido específico (enviar ao provedor)' },
       { path: '/api/orders/process-by-transaction/:transactionId', method: 'POST', description: 'Processar todos os pedidos pendentes de uma transação' },
-      { path: '/api/orders/by-email', method: 'POST', description: 'Consultar pedidos por email do usuário' }
+      { path: '/api/orders/by-email', method: 'POST', description: 'Consultar pedidos por email do usuário' },
+      { path: '/api/debug/transaction/:transactionId', method: 'GET', description: 'Ver estatísticas de rastreamento de uma transação' }
     ]
   });
 });
