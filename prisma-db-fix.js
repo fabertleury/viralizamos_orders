@@ -6,6 +6,8 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { PrismaClient } = require('@prisma/client');
+const { Pool } = require('pg');
 
 console.log('Iniciando script de correção do banco de dados...');
 
@@ -84,7 +86,6 @@ try {
   execSync('npx prisma generate', { stdio: 'inherit' });
   
   console.log('Verificando tabela Service...');
-  const { PrismaClient } = require('@prisma/client');
   const prisma = new PrismaClient();
   
   async function checkServiceTable() {
@@ -126,4 +127,104 @@ try {
 } catch (err) {
   console.error('Erro ao gerar cliente Prisma ou verificar tabela:', err);
   process.exit(1);
-} 
+}
+
+// Inicializar cliente Prisma
+const prisma = new PrismaClient();
+
+// Função para aplicar correções no banco de dados
+async function applyDatabaseCorrections() {
+  console.log('Aplicando correções no banco de dados...');
+  
+  try {
+    // Verificar conexão com o banco de dados
+    await prisma.$queryRaw`SELECT 1`;
+    console.log('Conexão com o banco de dados estabelecida com sucesso.');
+    
+    // Obter a string de conexão do banco de dados
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL não está definida');
+    }
+
+    // Conectar diretamente ao PostgreSQL
+    const pool = new Pool({ connectionString: databaseUrl });
+    
+    try {
+      // Verificar se a coluna 'processed' existe na tabela Order
+      const columnCheck = await pool.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'Order' 
+        AND column_name = 'processed'
+      `);
+      
+      if (columnCheck.rowCount === 0) {
+        console.log('Coluna processed não encontrada. Adicionando à tabela Order...');
+        
+        // Adicionar a coluna processed com valor padrão false
+        await pool.query(`
+          ALTER TABLE "Order"
+          ADD COLUMN IF NOT EXISTS processed BOOLEAN NOT NULL DEFAULT false
+        `);
+        
+        console.log('Coluna processed adicionada com sucesso.');
+      } else {
+        console.log('Coluna processed já existe na tabela Order. Prosseguindo...');
+      }
+      
+      // Remover a constraint de chave estrangeira problemática (se existir)
+      try {
+        await pool.query(`
+          ALTER TABLE "Order" DROP CONSTRAINT IF EXISTS "Order_provider_id_fkey"
+        `);
+        console.log('Constraint de chave estrangeira removida com sucesso (ou já não existia).');
+      } catch (constraintError) {
+        console.error('Erro ao remover constraint:', constraintError);
+      }
+      
+      // Adicionar a constraint novamente com a opção ON DELETE SET NULL
+      try {
+        await pool.query(`
+          ALTER TABLE "Order" 
+          ADD CONSTRAINT "Order_provider_id_fkey" 
+          FOREIGN KEY (provider_id) 
+          REFERENCES "Provider"(id) 
+          ON DELETE SET NULL
+        `);
+        console.log('Constraint de chave estrangeira adicionada novamente com opção ON DELETE SET NULL.');
+      } catch (constraintError) {
+        console.error('Erro ao adicionar nova constraint:', constraintError);
+      }
+      
+      console.log('Correções no banco de dados aplicadas com sucesso.');
+    } catch (sqlError) {
+      console.error('Erro ao executar consultas SQL:', sqlError);
+      throw sqlError;
+    } finally {
+      // Fechar a conexão com o pool PostgreSQL
+      await pool.end();
+    }
+  } catch (error) {
+    console.error('Erro ao aplicar correções no banco de dados:', error);
+    throw error;
+  } finally {
+    // Fechar a conexão Prisma
+    await prisma.$disconnect();
+  }
+}
+
+// Executar o script se chamado diretamente
+if (require.main === module) {
+  applyDatabaseCorrections()
+    .then(() => {
+      console.log('Script executed successfully.');
+      process.exit(0);
+    })
+    .catch(error => {
+      console.error('Script execution failed:', error);
+      process.exit(1);
+    });
+}
+
+module.exports = { applyDatabaseCorrections }; 

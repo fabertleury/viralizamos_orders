@@ -292,7 +292,7 @@ async function sendOrderToProvider(order) {
 
 // Função para rastrear posts recebidos em cada transação
 function trackPostForTransaction(transactionId, postIdentifier) {
-  if (!transactionId || !postIdentifier) return;
+  if (!transactionId || !postIdentifier) return false;
   
   // Obter ou criar conjunto de posts para esta transação
   let transactionPosts = transactionPostsCache.get(transactionId);
@@ -301,11 +301,18 @@ function trackPostForTransaction(transactionId, postIdentifier) {
     transactionPostsCache.set(transactionId, transactionPosts);
   }
   
+  // Verificar se este post já foi processado
+  if (transactionPosts.has(postIdentifier)) {
+    console.log(`[RASTREAMENTO] Post ${postIdentifier} já processado para transação ${transactionId}. Ignorando.`);
+    return true; // Post já existe
+  }
+  
   // Adicionar este post ao conjunto
   transactionPosts.add(postIdentifier);
   
   // Exibir status atual
   console.log(`[RASTREAMENTO] Transação ${transactionId} agora tem ${transactionPosts.size} posts rastreados: ${Array.from(transactionPosts).join(', ')}`);
+  return false; // Post é novo
 }
 
 // Função para obter estatísticas de uma transação
@@ -845,6 +852,19 @@ app.post('/api/orders/batch', async (req, res) => {
     for (let i = 0; i < orderData.posts.length; i++) {
       const post = orderData.posts[i];
       
+      // Extrair código do post
+      const postCode = post.code || post.post_code;
+      const postUrl = post.url || post.post_url || (postCode ? `https://instagram.com/p/${postCode}/` : null);
+      
+      // Verificar se já processamos este post na mesma transação (via cache)
+      if (postCode) {
+        const isPostAlreadyProcessed = trackPostForTransaction(transactionId, postCode);
+        if (isPostAlreadyProcessed) {
+          console.log(`Post ${postCode} já foi processado para transação ${transactionId}. Pulando...`);
+          continue; // Pular para o próximo post
+        }
+      }
+      
       // Gerar um external_order_id único para cada post
       const postExternalOrderId = `batch_${transactionId}_${i}_${Date.now()}`;
       
@@ -858,35 +878,9 @@ app.post('/api/orders/batch', async (req, res) => {
       // Garantir que a quantidade é um inteiro positivo
       postQuantity = Math.max(1, Math.round(postQuantity));
       
-      // Extrair código do post
-      const postCode = post.code || post.post_code;
-      const postUrl = post.url || post.post_url || (postCode ? `https://instagram.com/p/${postCode}/` : null);
-      
       // Rastrear este post para a transação
       if (postCode) {
         trackPostForTransaction(transactionId, postCode);
-      }
-      
-      // Verificar se já existe um pedido para este post na transação
-      if (postCode) {
-        const existingPost = await prisma.order.findFirst({
-          where: { 
-            transaction_id: transactionId,
-            metadata: {
-              path: ['post', 'post_code'],
-              equals: postCode
-            }
-          }
-        });
-        
-        if (existingPost) {
-          console.log(`Post ${postCode} já existe para esta transação. Ignorando.`);
-          createdOrders.push({
-            ...existingPost,
-            is_duplicate: true
-          });
-          continue;
-        }
       }
       
       // Preparar dados do post para salvar como metadata
