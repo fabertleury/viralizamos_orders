@@ -24,9 +24,13 @@ RUN npm uninstall prisma @prisma/client || true
 RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
 RUN npm install @apollo/server @graphql-tools/schema graphql
 
-# Copiar arquivo de ambiente e criar .env
-COPY .env.railway ./
-RUN cp .env.railway .env
+# Criar arquivo .env.railway e .env diretamente
+RUN echo "# Configuração do Supabase (site principal)" > .env.railway \
+    && echo "SUPABASE_URL=https://ijpwrspomqdnxavpjbzh.supabase.co" >> .env.railway \
+    && echo "SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlqcHdyc3BvbXFkbnhhdnBqYnpoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODM0Njc3NiwiZXhwIjoyMDUzOTIyNzc2fQ.9qjf-8uWdN6t1wS5i7BXI1Zp6lv-b0mcxXDaUJXFhTM" >> .env.railway \
+    && echo "NODE_ENV=production" >> .env.railway \
+    && echo "PORT=4000" >> .env.railway \
+    && cp .env.railway .env
 
 # Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/

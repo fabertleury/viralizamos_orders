@@ -26,13 +26,14 @@ fi
 echo "🔍 Verificando variáveis de ambiente do Railway:"
 if [ -n "$RAILWAY_STATIC_URL" ]; then
   echo "  Railway detectado: $RAILWAY_STATIC_URL"
+  echo "  Usando variáveis de ambiente do Railway"
+  # No Railway, as variáveis de ambiente já estão definidas, não precisamos carregá-las do arquivo
 else
   echo "  Não estamos no Railway"
+  # Carregar variáveis do arquivo .env manualmente para garantir
+  echo "🔄 Carregando variáveis do arquivo .env..."
+  export $(grep -v '^#' .env | xargs)
 fi
-
-# Carregar variáveis do arquivo .env manualmente para garantir
-echo "🔄 Carregando variáveis do arquivo .env..."
-export $(grep -v '^#' .env | xargs)
 
 # Configurar variáveis críticas manualmente se não definidas
 if [ -z "$SUPABASE_SERVICE_KEY" ]; then
