@@ -1,13 +1,30 @@
 [build]
-NIXPACKS_INSTALL_CMD = "npm install"
-NIXPACKS_BUILD_CMD = "npm run deploy:build"
+builder = "nixpacks"
+buildCommand = "npm install"
 
 [deploy]
-startCommand = "./start.sh"
+startCommand = "sh -c 'chmod +x ./start.sh && ./start.sh'"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
 RAILWAY_DOCKERFILE_PATH = "Dockerfile"
+
+[phases.setup]
+nixPkgs = ["postgresql", "openssl"]
+
+[[services]]
+internal_port = 4000
+auto_start_machines = true
+auto_stop_machines = true
+min_machines_running = 1
+processes = ["app"]
+
+[healthcheck]
+path = "/health"
+port = 4000
+interval = "15s"
+timeout = "10s"
 
 [variables]
 NODE_ENV = "production"
