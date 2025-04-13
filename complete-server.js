@@ -1916,6 +1916,77 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
   }
 });
 
+// Rota para atualizar orders no Prisma após processamento
+app.put('/api/orders/:id/process', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await prisma.order.findUnique({
+      where: { id }
+    });
+
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido não encontrado' });
+    }
+
+    const currentTimestamp = new Date();
+    
+    try {
+      // Verificar se a coluna 'processed' existe antes de tentar atualizar
+      await prisma.$executeRaw`
+        DO $$ 
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'Order' AND column_name = 'processed'
+          ) THEN
+            ALTER TABLE "Order" ADD COLUMN processed BOOLEAN NOT NULL DEFAULT false;
+          END IF;
+          
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = 'Order' AND column_name = 'processed_at'
+          ) THEN
+            ALTER TABLE "Order" ADD COLUMN processed_at TIMESTAMP WITH TIME ZONE;
+          END IF;
+        END $$;
+      `;
+      
+      // Agora podemos atualizar com segurança
+      await prisma.order.update({
+        where: { id },
+        data: {
+          processed: true,
+          processed_at: currentTimestamp,
+          // Outros campos que precisam ser atualizados
+          updated_at: currentTimestamp
+        }
+      });
+      
+      return res.json({ success: true, order: { id, processed: true, processed_at: currentTimestamp } });
+    } catch (updateError) {
+      console.error('Erro ao atualizar campos de processamento:', updateError);
+      
+      // Fallback para atualizações parciais se as colunas não existirem
+      await prisma.order.update({
+        where: { id },
+        data: {
+          // Apenas atualizar o timestamp genérico se as colunas não existirem
+          updated_at: currentTimestamp
+        }
+      });
+      
+      return res.json({ 
+        success: true, 
+        warning: 'Atualização parcial concluída: colunas de processamento não estão disponíveis',
+        order: { id, updated_at: currentTimestamp } 
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao processar pedido:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // Handler para rotas não encontradas
 app.use((req, res) => {
   res.status(404).json({
