@@ -1,20 +1,17 @@
 /**
- * Script para adicionar a coluna 'processed' à tabela Order
+ * Script para adicionar as colunas 'processed' e 'processed_at' à tabela Order
  */
 
 const { Pool } = require('pg');
 
-// Verificar se temos a variável de ambiente DATABASE_URL
-if (!process.env.DATABASE_URL) {
-  console.error('DATABASE_URL não está definida!');
-  process.exit(1);
-}
+// URL do banco de dados diretamente no código
+const DATABASE_URL = "postgresql://postgres:cgbdNabKzdmLNJWfXAGgNFqjwpwouFXZ@switchyard.proxy.rlwy.net:44974/railway";
 
-// Função principal para adicionar a coluna
-async function addProcessedColumn() {
+// Função principal para adicionar as colunas
+async function addRequiredColumns() {
   // Conectar diretamente ao PostgreSQL
   const pool = new Pool({ 
-    connectionString: process.env.DATABASE_URL 
+    connectionString: DATABASE_URL 
   });
   
   try {
@@ -53,26 +50,46 @@ async function addProcessedColumn() {
     
     // Verificar se a coluna 'processed' já existe
     console.log(`Verificando se a coluna 'processed' já existe em "${tableName}"...`);
-    const columnCheck = await pool.query(`
+    const processedColumnCheck = await pool.query(`
       SELECT column_name 
       FROM information_schema.columns 
       WHERE table_name = '${tableName}' 
       AND column_name = 'processed'
     `);
     
-    if (columnCheck.rowCount > 0) {
+    if (processedColumnCheck.rowCount > 0) {
       console.log(`A coluna 'processed' já existe na tabela "${tableName}".`);
-      return;
+    } else {
+      // Adicionar coluna 'processed' à tabela
+      console.log(`Adicionando coluna 'processed' à tabela "${tableName}"...`);
+      await pool.query(`
+        ALTER TABLE "${tableName}"
+        ADD COLUMN processed BOOLEAN NOT NULL DEFAULT false
+      `);
+      console.log('Coluna processed adicionada com sucesso!');
     }
     
-    // Adicionar coluna à tabela
-    console.log(`Adicionando coluna 'processed' à tabela "${tableName}"...`);
-    await pool.query(`
-      ALTER TABLE "${tableName}"
-      ADD COLUMN processed BOOLEAN NOT NULL DEFAULT false
+    // Verificar se a coluna 'processed_at' já existe
+    console.log(`Verificando se a coluna 'processed_at' já existe em "${tableName}"...`);
+    const processedAtColumnCheck = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = '${tableName}' 
+      AND column_name = 'processed_at'
     `);
     
-    console.log('Coluna processed adicionada com sucesso!');
+    if (processedAtColumnCheck.rowCount > 0) {
+      console.log(`A coluna 'processed_at' já existe na tabela "${tableName}".`);
+    } else {
+      // Adicionar coluna 'processed_at' à tabela
+      console.log(`Adicionando coluna 'processed_at' à tabela "${tableName}"...`);
+      await pool.query(`
+        ALTER TABLE "${tableName}"
+        ADD COLUMN processed_at TIMESTAMP WITH TIME ZONE
+      `);
+      console.log('Coluna processed_at adicionada com sucesso!');
+    }
+    
     console.log('Operação concluída com sucesso.');
   } catch (error) {
     console.error('Erro:', error);
@@ -85,7 +102,7 @@ async function addProcessedColumn() {
 }
 
 // Executar o script
-addProcessedColumn()
+addRequiredColumns()
   .then(() => {
     console.log('Script executado com sucesso.');
     process.exit(0);
