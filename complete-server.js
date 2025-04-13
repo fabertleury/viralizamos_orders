@@ -1172,7 +1172,9 @@ app.get(['/', '/api'], (req, res) => {
       { path: '/api/orders/:id/process', method: 'POST', description: 'Processar um pedido específico (enviar ao provedor)' },
       { path: '/api/orders/process-by-transaction/:transactionId', method: 'POST', description: 'Processar todos os pedidos pendentes de uma transação' },
       { path: '/api/orders/by-email', method: 'POST', description: 'Consultar pedidos por email do usuário' },
-      { path: '/api/debug/transaction/:transactionId', method: 'GET', description: 'Ver estatísticas de rastreamento de uma transação' }
+      { path: '/api/debug/transaction/:transactionId', method: 'GET', description: 'Ver estatísticas de rastreamento de uma transação' },
+      { path: '/api/orders/webhook/status', method: 'POST', description: 'Webhook para receber atualizações de status dos provedores' },
+      { path: '/api/orders/webhook/payment', method: 'POST', description: 'Webhook para receber notificações de pagamento' }
     ]
   });
 });
@@ -1182,16 +1184,16 @@ app.post('/api/orders/:id/process', async (req, res) => {
   try {
     const orderId = req.params.id;
     
-    // Buscar o pedido
+    // Buscar o pedido no banco de dados
     const order = await prisma.order.findUnique({
-      where: { id: orderId }
+      where: { id: orderId },
+      include: {
+        provider: true
+      }
     });
     
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        error: 'Pedido não encontrado'
-      });
+      return res.status(404).json({ error: 'Pedido não encontrado' });
     }
     
     // Verificar se o pedido já foi processado
@@ -1202,22 +1204,73 @@ app.post('/api/orders/:id/process', async (req, res) => {
       });
     }
     
-    // Enviar pedido ao provedor
-    const result = await sendOrderToProvider(order);
-    
-    if (result.success) {
-      return res.status(200).json({
+    // Enviar pedido para o provedor
+    try {
+      // Preparar payload para o provedor
+      const payload = {
+        key: order.provider.api_key,
+        action: 'add',
+        service: parseInt(order.external_service_id),
+        link: order.target_url,
+        quantity: order.quantity
+      };
+      
+      console.log(`Enviando pedido para provedor ${order.provider.name}:`, payload);
+      
+      // Enviar para o provedor
+      const response = await axios.post(order.provider.api_url, payload);
+      
+      console.log(`Resposta do provedor: ${JSON.stringify(response.data)}`);
+      
+      // Verificar resposta
+      if (!response.data || response.data.error) {
+        throw new Error(`Erro do provedor: ${JSON.stringify(response.data)}`);
+      }
+      
+      // Armazenar resposta do provedor
+      const providerResponse = response.data;
+      
+      // Atualizar o pedido com a resposta do provedor
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          status: 'processing',
+          provider_response: providerResponse, // Salvar a resposta completa do provedor
+          processed: true,
+          processed_at: new Date(),
+          metadata: {
+            ...order.metadata,
+            provider_processing: {
+              provider_order_id: providerResponse.order || null,
+              sent_at: new Date().toISOString(),
+              provider_response: providerResponse
+            }
+          }
+        }
+      });
+      
+      // Registrar sucesso no log
+      await prisma.orderLog.create({
+        data: {
+          order_id: orderId,
+          level: 'info',
+          message: `Pedido enviado para o provedor com sucesso. ID do pedido no provedor: ${providerResponse.order || 'não informado'}`,
+          data: { 
+            provider_response: providerResponse,
+            payload
+          }
+        }
+      });
+      
+      return res.json({
         success: true,
-        message: 'Pedido enviado ao provedor com sucesso',
-        order_id: order.id,
-        provider_response: result.data
+        message: 'Pedido enviado para processamento',
+        provider_order_id: providerResponse.order || null,
+        provider_response: providerResponse
       });
-    } else {
-      return res.status(500).json({
-        success: false,
-        error: result.error,
-        order_id: order.id
-      });
+      
+    } catch (providerError) {
+      // ... código existente para tratar erros ...
     }
   } catch (error) {
     console.error('Erro ao processar pedido:', error);
@@ -1245,6 +1298,9 @@ app.post('/api/orders/process-by-transaction/:transactionId', async (req, res) =
       where: { 
         transaction_id: transactionId,
         status: 'pending'
+      },
+      include: {
+        provider: true // Incluir dados do provedor
       }
     });
     
@@ -1271,14 +1327,109 @@ app.post('/api/orders/process-by-transaction/:transactionId', async (req, res) =
       }
       
       console.log(`Processando pedido ${i+1}/${pendingOrders.length}: ${order.id}`);
-      const result = await sendOrderToProvider(order);
       
-      results.push({
-        order_id: order.id,
-        success: result.success,
-        data: result.success ? result.data : null,
-        error: result.success ? null : result.error
-      });
+      try {
+        // Verificar se temos todas as informações necessárias
+        if (!order.provider || !order.provider.api_key || !order.provider.api_url || !order.external_service_id) {
+          throw new Error('Informações de provedor ou serviço incompletas');
+        }
+        
+        // Preparar payload para o provedor
+        const payload = {
+          key: order.provider.api_key,
+          action: 'add',
+          service: parseInt(order.external_service_id),
+          link: order.target_url,
+          quantity: order.quantity
+        };
+        
+        console.log(`Enviando pedido para provedor ${order.provider.name}:`, payload);
+        
+        // Enviar para o provedor
+        const response = await axios.post(order.provider.api_url, payload);
+        
+        console.log(`Resposta do provedor: ${JSON.stringify(response.data)}`);
+        
+        // Verificar resposta
+        if (!response.data || response.data.error) {
+          throw new Error(`Erro do provedor: ${JSON.stringify(response.data)}`);
+        }
+        
+        // Armazenar resposta do provedor
+        const providerResponse = response.data;
+        
+        // Atualizar o pedido com a resposta do provedor
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            status: 'processing',
+            provider_response: providerResponse, // Salvar a resposta completa do provedor
+            processed: true,
+            processed_at: new Date(),
+            metadata: {
+              ...order.metadata,
+              provider_processing: {
+                provider_order_id: providerResponse.order || null,
+                sent_at: new Date().toISOString(),
+                provider_response: providerResponse
+              }
+            }
+          }
+        });
+        
+        // Registrar sucesso no log
+        await prisma.orderLog.create({
+          data: {
+            order_id: order.id,
+            level: 'info',
+            message: `Pedido enviado para o provedor com sucesso. ID do pedido no provedor: ${providerResponse.order || 'não informado'}`,
+            data: { 
+              provider_response: providerResponse,
+              payload
+            }
+          }
+        });
+        
+        results.push({
+          order_id: order.id,
+          success: true,
+          provider_order_id: providerResponse.order || null,
+          provider_response: providerResponse
+        });
+      } catch (error) {
+        console.error(`Erro ao processar pedido ${order.id}:`, error);
+        
+        // Registrar o erro
+        await prisma.orderLog.create({
+          data: {
+            order_id: order.id,
+            message: `Erro ao enviar pedido ao provedor: ${error.message}`,
+            level: 'error',
+            data: { error: error.message, stack: error.stack }
+          }
+        });
+        
+        // Atualizar o pedido para status de erro
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            status: 'failed',
+            metadata: {
+              ...order.metadata,
+              processing_error: {
+                message: error.message,
+                timestamp: new Date().toISOString()
+              }
+            }
+          }
+        });
+        
+        results.push({
+          order_id: order.id,
+          success: false,
+          error: error.message
+        });
+      }
     }
     
     return res.status(200).json({
@@ -1288,6 +1439,209 @@ app.post('/api/orders/process-by-transaction/:transactionId', async (req, res) =
     });
   } catch (error) {
     console.error('Erro ao processar pedidos da transação:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Erro interno: ${error.message}`
+    });
+  }
+});
+
+// Adicionar rota de webhook para atualizações de status dos provedores
+app.post('/api/orders/webhook/status', async (req, res) => {
+  try {
+    console.log('Recebido webhook de atualização de status:', JSON.stringify(req.body, null, 2));
+    
+    // Extrair dados do webhook - diferentes provedores podem ter formatos diferentes
+    const webhookData = req.body;
+    
+    // Verificar se temos um ID de pedido do provedor
+    const providerOrderId = webhookData.order || webhookData.order_id;
+    if (!providerOrderId) {
+      console.warn('Webhook recebido sem ID de pedido do provedor');
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ID de pedido do provedor não encontrado no webhook' 
+      });
+    }
+    
+    // Buscar pedido pelo provider_response.order
+    const order = await prisma.order.findFirst({
+      where: {
+        provider_response: {
+          path: ['order'],
+          equals: providerOrderId
+        }
+      }
+    });
+    
+    if (!order) {
+      console.warn(`Nenhum pedido encontrado para o ID do provedor: ${providerOrderId}`);
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Pedido não encontrado' 
+      });
+    }
+    
+    console.log(`Pedido encontrado: ${order.id}`);
+    
+    // Mapear status do provedor para nosso sistema
+    let newStatus = 'processing'; // Status padrão
+    
+    if (webhookData.status) {
+      if (['completed', 'complete', 'done', 'finished'].includes(webhookData.status.toLowerCase())) {
+        newStatus = 'completed';
+      } else if (['failed', 'error', 'cancelled', 'canceled'].includes(webhookData.status.toLowerCase())) {
+        newStatus = 'failed';
+      } else if (['pending', 'processing', 'in_progress', 'progress'].includes(webhookData.status.toLowerCase())) {
+        newStatus = 'processing';
+      }
+    }
+    
+    // Atualizar pedido com as informações do webhook
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        status: newStatus,
+        metadata: {
+          ...order.metadata,
+          webhook_updates: [
+            ...(order.metadata?.webhook_updates || []),
+            {
+              timestamp: new Date().toISOString(),
+              data: webhookData,
+              mapped_status: newStatus
+            }
+          ]
+        }
+      }
+    });
+    
+    // Criar log do webhook
+    await prisma.orderLog.create({
+      data: {
+        order_id: order.id,
+        message: `Webhook recebido: Status atualizado para ${newStatus}`,
+        level: 'info',
+        data: webhookData
+      }
+    });
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Webhook processado com sucesso',
+      order_id: order.id,
+      new_status: newStatus
+    });
+    
+  } catch (error) {
+    console.error('Erro ao processar webhook:', error);
+    return res.status(500).json({
+      success: false,
+      error: `Erro interno: ${error.message}`
+    });
+  }
+});
+
+// Rota de webhook para receber notificações de pagamento
+app.post('/api/orders/webhook/payment', async (req, res) => {
+  try {
+    console.log('Recebido webhook de pagamento:', JSON.stringify(req.body, null, 2));
+    
+    const { transaction_id, metadata } = req.body;
+    
+    if (!transaction_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'ID de transação não fornecido no webhook'
+      });
+    }
+    
+    // Verificar se existem pedidos para esta transação
+    const ordersCount = await prisma.order.count({
+      where: { transaction_id }
+    });
+    
+    if (ordersCount === 0) {
+      console.log(`Nenhum pedido encontrado para transaction_id ${transaction_id}, criando novos pedidos...`);
+      
+      // Se não houver pedidos, criar novos pedidos para os posts
+      if (!metadata || !metadata.posts || !Array.isArray(metadata.posts) || metadata.posts.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Dados de posts não fornecidos no webhook'
+        });
+      }
+      
+      // Criar pedidos para cada post
+      const createdOrders = [];
+      
+      for (const post of metadata.posts) {
+        // Criar pedido
+        const createdOrder = await prisma.order.create({
+          data: {
+            transaction_id,
+            service_id: metadata.service || null,
+            external_service_id: metadata.external_service_id || null,
+            status: 'pending',
+            target_username: metadata.profile || post.username || '',
+            target_url: post.url || `https://instagram.com/p/${post.code}/`,
+            quantity: post.quantity || metadata.total_quantity || 100,
+            customer_email: metadata.customer?.email || '',
+            customer_name: metadata.customer?.name || '',
+            metadata: {
+              payment_webhook: {
+                received_at: new Date().toISOString(),
+                data: req.body
+              },
+              post: {
+                post_id: post.id,
+                post_code: post.code,
+                post_url: post.url,
+                type: post.type || 'post'
+              }
+            }
+          }
+        });
+        
+        createdOrders.push(createdOrder);
+      }
+      
+      return res.status(201).json({
+        success: true,
+        message: 'Pedidos criados com sucesso a partir do webhook',
+        orders_count: createdOrders.length,
+        orders: createdOrders.map(o => o.id)
+      });
+    }
+    
+    console.log(`Encontrados ${ordersCount} pedidos para transaction_id ${transaction_id}`);
+    
+    // Se já existem pedidos, apenas atualizar o status para 'pending_processing'
+    await prisma.order.updateMany({
+      where: { 
+        transaction_id,
+        status: 'pending'
+      },
+      data: {
+        status: 'pending_processing',
+        metadata: {
+          payment_webhook: {
+            received_at: new Date().toISOString(),
+            data: req.body
+          }
+        }
+      }
+    });
+    
+    return res.status(200).json({
+      success: true,
+      message: 'Pagamento confirmado, pedidos atualizados',
+      transaction_id,
+      orders_updated: ordersCount
+    });
+    
+  } catch (error) {
+    console.error('Erro ao processar webhook de pagamento:', error);
     return res.status(500).json({
       success: false,
       error: `Erro interno: ${error.message}`

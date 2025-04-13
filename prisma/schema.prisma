@@ -58,6 +58,8 @@ model Order {
   updated_at         DateTime   @updatedAt
   completed_at       DateTime?
   metadata           Json?
+  processed          Boolean    @default(false)
+  processed_at       DateTime?
   provider           Provider?  @relation(fields: [provider_id], references: [id])
   user               User?      @relation(fields: [user_id], references: [id])
   logs               OrderLog[]
