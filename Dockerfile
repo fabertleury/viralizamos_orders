@@ -19,9 +19,10 @@ ENV PRISMA_CLI_BINARY_TARGETS=linux-musl-openssl-3.0.x
 # Copiar arquivos necessários para instalar dependências
 COPY package*.json ./
 
-# Instalar dependências com versão específica do Prisma
+# Instalar dependências
 RUN npm uninstall prisma @prisma/client || true
 RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
+RUN npm install @apollo/server @graphql-tools/schema graphql
 
 # Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/
@@ -50,8 +51,11 @@ RUN if [ ! -f node_modules/.prisma/client/runtime/libquery_engine-linux-musl-ope
     npx prisma@4.8.1 generate --schema=./prisma/schema.prisma; \
     fi
 
-# Copiar o servidor completo
-COPY complete-server.js ./
+# Copiar diretório source
+COPY src ./src/
+
+# Copiar o arquivo modificado que suporta GraphQL
+COPY modified-server.js ./
 
 # Copiar o restante dos arquivos
 COPY . .
@@ -62,5 +66,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 
 EXPOSE 4000
 
-# Iniciar o servidor completo diretamente
-CMD ["node", "complete-server.js"] 
+# Iniciar o servidor modificado que suporta GraphQL
+CMD ["node", "modified-server.js"] 
