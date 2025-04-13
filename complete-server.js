@@ -511,6 +511,34 @@ app.post('/api/orders/create', async (req, res) => {
           if (!providerId && providerInfo) {
             providerId = providerInfo.id;
             console.log(`Provider ID obtido do Supabase: ${providerId}`);
+            
+            // Verificar se o provedor existe no banco local
+            const existingProvider = await prisma.provider.findUnique({
+              where: { id: providerId }
+            });
+            
+            // Se o provedor não existir, criar automaticamente
+            if (!existingProvider && providerInfo) {
+              console.log(`Provedor não encontrado no banco local. Criando provedor com ID ${providerId}...`);
+              try {
+                await prisma.provider.create({
+                  data: {
+                    id: providerId,
+                    name: providerInfo.name || 'Provedor',
+                    slug: providerInfo.slug || `provider-${Date.now()}`,
+                    api_url: providerInfo.api_url || '',
+                    api_key: providerInfo.api_key || '',
+                    status: true,
+                    created_at: new Date(),
+                    updated_at: new Date()
+                  }
+                });
+                console.log(`Provedor criado com sucesso: ${providerId}`);
+              } catch (providerCreateError) {
+                console.error(`Erro ao criar provedor: ${providerCreateError.message}`);
+                // Continuar sem falhar, tentando usar o ID do provedor de qualquer forma
+              }
+            }
           }
           
           if (!externalServiceId) {
@@ -796,6 +824,34 @@ app.post('/api/orders/batch', async (req, res) => {
           if (!providerId && providerInfo) {
             providerId = providerInfo.id;
             console.log(`Provider ID obtido do Supabase: ${providerId}`);
+            
+            // Verificar se o provedor existe no banco local
+            const existingProvider = await prisma.provider.findUnique({
+              where: { id: providerId }
+            });
+            
+            // Se o provedor não existir, criar automaticamente
+            if (!existingProvider && providerInfo) {
+              console.log(`Provedor não encontrado no banco local. Criando provedor com ID ${providerId}...`);
+              try {
+                await prisma.provider.create({
+                  data: {
+                    id: providerId,
+                    name: providerInfo.name || 'Provedor',
+                    slug: providerInfo.slug || `provider-${Date.now()}`,
+                    api_url: providerInfo.api_url || '',
+                    api_key: providerInfo.api_key || '',
+                    status: true,
+                    created_at: new Date(),
+                    updated_at: new Date()
+                  }
+                });
+                console.log(`Provedor criado com sucesso: ${providerId}`);
+              } catch (providerCreateError) {
+                console.error(`Erro ao criar provedor: ${providerCreateError.message}`);
+                // Continuar sem falhar, tentando usar o ID do provedor de qualquer forma
+              }
+            }
           }
           
           if (!externalServiceId) {
@@ -805,6 +861,7 @@ app.post('/api/orders/batch', async (req, res) => {
         }
       } catch (error) {
         console.error(`Erro ao buscar informações do serviço no Supabase: ${error.message}`);
+        // Continuar e tentar o método fallback
       }
       
       // Se não conseguiu no Supabase, tentar no banco local
