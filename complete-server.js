@@ -38,24 +38,8 @@ async function applyDatabaseCorrections() {
     await prisma.$executeRaw`ALTER TABLE "Order" DROP CONSTRAINT IF EXISTS "Order_serviceId_fkey"`;
     console.log('Constraint de chave estrangeira removida com sucesso (ou já não existia).');
     
-    // Verificar se o serviço 'viralizamos' existe
-    const service = await prisma.service.findFirst({
-      where: { name: 'viralizamos' }
-    });
-    
-    // Se não existir, criar
-    if (!service) {
-      await prisma.service.create({
-        data: {
-          name: 'viralizamos',
-          description: 'Serviço principal da Viralizamos',
-          url: 'https://viralizamos.com'
-        }
-      });
-      console.log('Serviço "viralizamos" criado com sucesso.');
-    } else {
-      console.log('Serviço "viralizamos" já existe, nenhuma alteração necessária.');
-    }
+    // Não vamos mais verificar ou criar o serviço 'viralizamos' no banco local
+    // já que os serviços são acessados diretamente do Supabase
     
     return true;
   } catch (error) {
@@ -87,23 +71,25 @@ app.post('/api/orders/create', async (req, res) => {
           posts: [post]
         };
         
+        // Modificado para não usar mais a relação com serviço local
         const createdOrder = await prisma.order.create({
           data: {
-            rawData: JSON.stringify(orderData),
+            transaction_id: order.transaction_id || `tx-${Date.now()}`,
+            service_id: order.service_id, // Apenas armazenamos o ID, não fazemos conexão
+            external_service_id: order.external_service_id,
             status: 'CREATED',
-            service: {
-              connect: {
-                name: 'viralizamos'
-              }
-            }
+            target_username: post.username || order.target_username || '',
+            target_url: post.url || order.target_url || '',
+            customer_name: order.customer_name || '',
+            customer_email: order.customer_email || '',
+            metadata: order.metadata || {},
           }
         });
         
         // Criar log da ordem
         await prisma.orderLog.create({
           data: {
-            orderId: createdOrder.id,
-            status: 'CREATED',
+            order_id: createdOrder.id,
             message: 'Ordem criada com sucesso'
           }
         });
@@ -115,23 +101,25 @@ app.post('/api/orders/create', async (req, res) => {
       return res.status(201).json({ success: true, orders: createdOrders });
     } else {
       // Processar como uma única ordem
+      // Modificado para não usar mais a relação com serviço local
       const createdOrder = await prisma.order.create({
         data: {
-          rawData: JSON.stringify(order),
+          transaction_id: order.transaction_id || `tx-${Date.now()}`,
+          service_id: order.service_id, // Apenas armazenamos o ID, não fazemos conexão
+          external_service_id: order.external_service_id,
           status: 'CREATED',
-          service: {
-            connect: {
-              name: 'viralizamos'
-            }
-          }
+          target_username: order.target_username || '',
+          target_url: order.target_url || '',
+          customer_name: order.customer_name || '',
+          customer_email: order.customer_email || '',
+          metadata: order.metadata || {},
         }
       });
       
       // Criar log da ordem
       await prisma.orderLog.create({
         data: {
-          orderId: createdOrder.id,
-          status: 'CREATED',
+          order_id: createdOrder.id,
           message: 'Ordem criada com sucesso'
         }
       });
