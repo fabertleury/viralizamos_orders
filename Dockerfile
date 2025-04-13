@@ -98,11 +98,14 @@ COPY . .
 # Garantir novamente que o script tenha permissões de execução
 RUN chmod 755 ./start.sh && ls -la start.sh
 
+# Copiar para o local que o contêiner está procurando
+RUN cp ./start.sh /app/.start.sh && chmod 755 /app/.start.sh
+
 # Health check básico
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:4000/health || exit 1
 
 EXPOSE 4000
 
-# Iniciar com nosso script de inicialização
-CMD ["sh", "./start.sh"] 
+# Iniciar com nosso script de inicialização (usando o caminho absoluto)
+CMD ["sh", "/app/.start.sh"] 
