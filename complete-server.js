@@ -239,17 +239,73 @@ async function sendOrderToProvider(order) {
     const response = await axios.post(provider.api_url, payload, {
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 30000 // 30 segundos timeout
     });
     
     console.log('Resposta do provedor:', JSON.stringify(response.data, null, 2));
+    
+    // Extrair detalhes da resposta
+    let externalOrderId = null;
+    let providerStatus = 'processing';
+    let detailedResponse = {};
+    
+    try {
+      // Tentar extrair informações relevantes com base nos formatos de resposta dos provedores comuns
+      if (response.data) {
+        // Formato comum: { order: "12345" }
+        if (response.data.order) {
+          externalOrderId = response.data.order;
+        }
+        // Formato comum: { id: "12345" }
+        else if (response.data.id) {
+          externalOrderId = response.data.id;
+        }
+        // Formato comum: { data: { id: "12345" } }
+        else if (response.data.data && response.data.data.id) {
+          externalOrderId = response.data.data.id;
+        }
+        
+        // Verificar status da resposta
+        if (response.data.status) {
+          providerStatus = response.data.status.toLowerCase();
+        } else if (response.data.data && response.data.data.status) {
+          providerStatus = response.data.data.status.toLowerCase();
+        }
+        
+        // Mapear status do provedor para o nosso sistema
+        if (providerStatus === 'pending' || providerStatus === 'in_progress' || providerStatus === 'processing') {
+          providerStatus = 'processing';
+        } else if (providerStatus === 'completed' || providerStatus === 'success' || providerStatus === 'done') {
+          providerStatus = 'completed';
+        } else if (providerStatus === 'cancelled' || providerStatus === 'failed' || providerStatus === 'error') {
+          providerStatus = 'failed';
+        }
+        
+        // Armazenar resposta detalhada
+        detailedResponse = {
+          raw_response: response.data,
+          extracted_order_id: externalOrderId,
+          provider_status: providerStatus,
+          response_time: new Date().toISOString(),
+          provider_name: provider.name,
+          provider_id: provider.id
+        };
+      }
+    } catch (parseError) {
+      console.error('Erro ao analisar resposta do provedor:', parseError);
+      detailedResponse.parse_error = parseError.message;
+    }
     
     // Atualizar o pedido com a resposta do provedor
     await prisma.order.update({
       where: { id: order.id },
       data: {
-        status: 'processing',
-        provider_response: response.data
+        status: providerStatus,
+        provider_response: detailedResponse,
+        external_order_id: externalOrderId || order.external_order_id,
+        processed: true,
+        processed_at: new Date()
       }
     });
     
@@ -257,10 +313,10 @@ async function sendOrderToProvider(order) {
     await prisma.orderLog.create({
       data: {
         order_id: order.id,
-        message: 'Pedido enviado ao provedor',
+        message: `Pedido enviado ao provedor${externalOrderId ? ` com ID externo ${externalOrderId}` : ''}`,
         level: 'info',
         data: {
-          provider_response: response.data,
+          provider_response: detailedResponse,
           provider_request: payload
         }
       }
@@ -268,7 +324,11 @@ async function sendOrderToProvider(order) {
     
     return {
       success: true,
-      data: response.data
+      data: response.data,
+      extracted_details: {
+        external_order_id: externalOrderId,
+        status: providerStatus
+      }
     };
   } catch (error) {
     console.error(`Erro ao enviar pedido ${order.id} ao provedor:`, error);
@@ -521,6 +581,26 @@ app.post('/api/orders/create', async (req, res) => {
             if (!existingProvider && providerInfo) {
               console.log(`Provedor não encontrado no banco local. Criando provedor com ID ${providerId}...`);
               try {
+                // Remover a constraint de chave estrangeira temporariamente
+                await prisma.$executeRaw`
+                  DO $$ 
+                  BEGIN
+                    -- Verifica se a constraint existe
+                    IF EXISTS (
+                      SELECT 1 FROM information_schema.table_constraints 
+                      WHERE constraint_name = 'Order_provider_id_fkey' 
+                      AND table_name = 'Order'
+                    ) THEN
+                      -- Remove a constraint
+                      ALTER TABLE "Order" DROP CONSTRAINT "Order_provider_id_fkey";
+                      RAISE NOTICE 'Constraint removida.';
+                    ELSE
+                      RAISE NOTICE 'Constraint não encontrada.';
+                    END IF;
+                  END $$;
+                `;
+                
+                // Criar o provedor
                 await prisma.provider.create({
                   data: {
                     id: providerId,
@@ -533,10 +613,21 @@ app.post('/api/orders/create', async (req, res) => {
                     updated_at: new Date()
                   }
                 });
+                
+                // Recriar a constraint de chave estrangeira
+                await prisma.$executeRaw`
+                  ALTER TABLE "Order"
+                  ADD CONSTRAINT "Order_provider_id_fkey"
+                  FOREIGN KEY ("provider_id")
+                  REFERENCES "Provider"("id")
+                  ON DELETE SET NULL;
+                `;
+                
                 console.log(`Provedor criado com sucesso: ${providerId}`);
               } catch (providerCreateError) {
                 console.error(`Erro ao criar provedor: ${providerCreateError.message}`);
-                // Continuar sem falhar, tentando usar o ID do provedor de qualquer forma
+                // Se falhar em criar o provedor, não associar ao pedido
+                providerId = null;
               }
             }
           }
@@ -676,6 +767,37 @@ app.post('/api/orders/create', async (req, res) => {
         
         createdOrders.push(createdOrder);
         console.log(`Ordem criada com ID: ${createdOrder.id}`);
+        
+        // Enviar pedido ao provedor
+        if (providerId && externalServiceId) {
+          try {
+            console.log(`Enviando ordem ${createdOrder.id} para o provedor...`);
+            const providerResponse = await sendOrderToProvider(createdOrder);
+            
+            if (providerResponse.success) {
+              console.log(`Ordem ${createdOrder.id} enviada com sucesso ao provedor. Resposta:`, JSON.stringify(providerResponse.data, null, 2));
+              
+              // Atualizar ordem com ID externo se fornecido pelo provedor
+              if (providerResponse.data && providerResponse.data.order) {
+                await prisma.order.update({
+                  where: { id: createdOrder.id },
+                  data: {
+                    external_order_id: providerResponse.data.order,
+                    status: 'processing'
+                  }
+                });
+                
+                console.log(`Ordem ${createdOrder.id} atualizada com ID externo: ${providerResponse.data.order}`);
+              }
+            } else {
+              console.error(`Falha ao enviar ordem ${createdOrder.id} para o provedor:`, providerResponse.error);
+            }
+          } catch (providerError) {
+            console.error(`Erro ao enviar ordem ${createdOrder.id} para o provedor:`, providerError);
+          }
+        } else {
+          console.warn(`Não foi possível enviar a ordem ${createdOrder.id} ao provedor: providerId ou externalServiceId não disponíveis`);
+        }
       }
       
       return res.status(201).json({ success: true, orders: createdOrders });
@@ -744,6 +866,38 @@ app.post('/api/orders/create', async (req, res) => {
       });
       
       console.log(`Ordem única criada com ID: ${createdOrder.id}`);
+      
+      // Enviar pedido ao provedor
+      if (providerId && externalServiceId) {
+        try {
+          console.log(`Enviando ordem ${createdOrder.id} para o provedor...`);
+          const providerResponse = await sendOrderToProvider(createdOrder);
+          
+          if (providerResponse.success) {
+            console.log(`Ordem ${createdOrder.id} enviada com sucesso ao provedor. Resposta:`, JSON.stringify(providerResponse.data, null, 2));
+            
+            // Atualizar ordem com ID externo se fornecido pelo provedor
+            if (providerResponse.data && providerResponse.data.order) {
+              await prisma.order.update({
+                where: { id: createdOrder.id },
+                data: {
+                  external_order_id: providerResponse.data.order,
+                  status: 'processing'
+                }
+              });
+              
+              console.log(`Ordem ${createdOrder.id} atualizada com ID externo: ${providerResponse.data.order}`);
+            }
+          } else {
+            console.error(`Falha ao enviar ordem ${createdOrder.id} para o provedor:`, providerResponse.error);
+          }
+        } catch (providerError) {
+          console.error(`Erro ao enviar ordem ${createdOrder.id} para o provedor:`, providerError);
+        }
+      } else {
+        console.warn(`Não foi possível enviar a ordem ${createdOrder.id} ao provedor: providerId ou externalServiceId não disponíveis`);
+      }
+      
       return res.status(201).json({ success: true, order: createdOrder });
     }
   } catch (error) {
@@ -834,6 +988,26 @@ app.post('/api/orders/batch', async (req, res) => {
             if (!existingProvider && providerInfo) {
               console.log(`Provedor não encontrado no banco local. Criando provedor com ID ${providerId}...`);
               try {
+                // Remover a constraint de chave estrangeira temporariamente
+                await prisma.$executeRaw`
+                  DO $$ 
+                  BEGIN
+                    -- Verifica se a constraint existe
+                    IF EXISTS (
+                      SELECT 1 FROM information_schema.table_constraints 
+                      WHERE constraint_name = 'Order_provider_id_fkey' 
+                      AND table_name = 'Order'
+                    ) THEN
+                      -- Remove a constraint
+                      ALTER TABLE "Order" DROP CONSTRAINT "Order_provider_id_fkey";
+                      RAISE NOTICE 'Constraint removida.';
+                    ELSE
+                      RAISE NOTICE 'Constraint não encontrada.';
+                    END IF;
+                  END $$;
+                `;
+                
+                // Criar o provedor
                 await prisma.provider.create({
                   data: {
                     id: providerId,
@@ -846,10 +1020,21 @@ app.post('/api/orders/batch', async (req, res) => {
                     updated_at: new Date()
                   }
                 });
+                
+                // Recriar a constraint de chave estrangeira
+                await prisma.$executeRaw`
+                  ALTER TABLE "Order"
+                  ADD CONSTRAINT "Order_provider_id_fkey"
+                  FOREIGN KEY ("provider_id")
+                  REFERENCES "Provider"("id")
+                  ON DELETE SET NULL;
+                `;
+                
                 console.log(`Provedor criado com sucesso: ${providerId}`);
               } catch (providerCreateError) {
                 console.error(`Erro ao criar provedor: ${providerCreateError.message}`);
-                // Continuar sem falhar, tentando usar o ID do provedor de qualquer forma
+                // Se falhar em criar o provedor, não associar ao pedido
+                providerId = null;
               }
             }
           }
@@ -1012,6 +1197,37 @@ app.post('/api/orders/batch', async (req, res) => {
       
       createdOrders.push(createdOrder);
       console.log(`Ordem criada com ID: ${createdOrder.id} para post ${postCode || 'Sem código'}`);
+      
+      // Enviar pedido ao provedor
+      if (providerId && externalServiceId) {
+        try {
+          console.log(`Enviando ordem ${createdOrder.id} para o provedor...`);
+          const providerResponse = await sendOrderToProvider(createdOrder);
+          
+          if (providerResponse.success) {
+            console.log(`Ordem ${createdOrder.id} enviada com sucesso ao provedor. Resposta:`, JSON.stringify(providerResponse.data, null, 2));
+            
+            // Atualizar ordem com ID externo se fornecido pelo provedor
+            if (providerResponse.data && providerResponse.data.order) {
+              await prisma.order.update({
+                where: { id: createdOrder.id },
+                data: {
+                  external_order_id: providerResponse.data.order,
+                  status: 'processing'
+                }
+              });
+              
+              console.log(`Ordem ${createdOrder.id} atualizada com ID externo: ${providerResponse.data.order}`);
+            }
+          } else {
+            console.error(`Falha ao enviar ordem ${createdOrder.id} para o provedor:`, providerResponse.error);
+          }
+        } catch (providerError) {
+          console.error(`Erro ao enviar ordem ${createdOrder.id} para o provedor:`, providerError);
+        }
+      } else {
+        console.warn(`Não foi possível enviar a ordem ${createdOrder.id} ao provedor: providerId ou externalServiceId não disponíveis`);
+      }
     }
     
     // Retornar os pedidos criados
