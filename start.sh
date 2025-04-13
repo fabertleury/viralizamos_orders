@@ -8,6 +8,20 @@ echo "- Diretório atual: $(pwd)"
 echo "- Arquivos de configuração:"
 ls -la *.env* 2>/dev/null || echo "  Nenhum arquivo .env encontrado"
 
+# Garantir que temos um arquivo .env
+if [ ! -f ".env" ] && [ -f ".env.railway" ]; then
+  echo "🔄 Arquivo .env não encontrado, criando a partir de .env.railway..."
+  cp .env.railway .env
+  echo "✅ Arquivo .env criado com sucesso!"
+elif [ ! -f ".env" ]; then
+  echo "⚠️ ALERTA: Nenhum arquivo .env encontrado! Criando um arquivo .env básico..."
+  echo "NODE_ENV=production" > .env
+  echo "PORT=4000" >> .env
+  echo "SUPABASE_URL=https://ijpwrspomqdnxavpjbzh.supabase.co" >> .env
+  echo "SUPABASE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlqcHdyc3BvbXFkbnhhdnBqYnpoIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTczODM0Njc3NiwiZXhwIjoyMDUzOTIyNzc2fQ.9qjf-8uWdN6t1wS5i7BXI1Zp6lv-b0mcxXDaUJXFhTM" >> .env
+  echo "✅ Arquivo .env básico criado!"
+fi
+
 # Verificar se as variáveis de ambiente foram definidas pelo Railway
 echo "🔍 Verificando variáveis de ambiente do Railway:"
 if [ -n "$RAILWAY_STATIC_URL" ]; then
@@ -16,26 +30,9 @@ else
   echo "  Não estamos no Railway"
 fi
 
-# Copiar arquivo .env.railway se existir
-if [ -f ".env.railway" ]; then
-  echo "🔄 Copiando configurações específicas do Railway..."
-  cp .env.railway .env
-  echo "✅ Configurações copiadas com sucesso!"
-  
-  # Carregar variáveis do arquivo .env manualmente para garantir
-  echo "🔄 Carregando variáveis do arquivo .env..."
-  export $(grep -v '^#' .env | xargs)
-elif [ -f "/app/.env.railway" ]; then
-  echo "🔄 Copiando configurações específicas do Railway do diretório /app..."
-  cp /app/.env.railway /app/.env
-  echo "✅ Configurações copiadas com sucesso!"
-  
-  # Carregar variáveis do arquivo .env manualmente para garantir
-  echo "🔄 Carregando variáveis do arquivo /app/.env..."
-  export $(grep -v '^#' /app/.env | xargs)
-else
-  echo "⚠️ Arquivo .env.railway não encontrado!"
-fi
+# Carregar variáveis do arquivo .env manualmente para garantir
+echo "🔄 Carregando variáveis do arquivo .env..."
+export $(grep -v '^#' .env | xargs)
 
 # Configurar variáveis críticas manualmente se não definidas
 if [ -z "$SUPABASE_SERVICE_KEY" ]; then
@@ -60,17 +57,17 @@ echo "SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:0:10}... (ocultado)"
 export NODE_ENV=production
 
 # Executar o SQL personalizado para remover Service model
-if [ -f "/app/prisma/remove_service_model.sql" ]; then
+if [ -f "./prisma/remove_service_model.sql" ]; then
   echo "🔄 Aplicando correções no banco de dados..."
-  npx prisma db execute --file /app/prisma/remove_service_model.sql --schema /app/prisma/schema.prisma || echo "⚠️ Falha ao aplicar correções no banco de dados"
+  npx prisma db execute --file ./prisma/remove_service_model.sql --schema ./prisma/schema.prisma || echo "⚠️ Falha ao aplicar correções no banco de dados"
 fi
 
 # Verificar se o servidor completo existe e iniciar
-if [ -f "/app/complete-server.js" ]; then
+if [ -f "./complete-server.js" ]; then
   # Iniciar o servidor completo diretamente
   echo "🚀 Iniciando servidor completo..."
   # Iniciar com variáveis de ambiente definidas explicitamente
-  SUPABASE_URL="$SUPABASE_URL" SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" NODE_ENV=production exec node /app/complete-server.js
+  SUPABASE_URL="$SUPABASE_URL" SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" NODE_ENV=production exec node ./complete-server.js
 else
   echo "⚠️ Servidor completo não encontrado, procurando alternativas..."
 

@@ -24,6 +24,10 @@ RUN npm uninstall prisma @prisma/client || true
 RUN npm install --save-exact prisma@4.8.1 @prisma/client@4.8.1
 RUN npm install @apollo/server @graphql-tools/schema graphql
 
+# Copiar arquivo de ambiente e criar .env
+COPY .env.railway ./
+RUN cp .env.railway .env
+
 # Copiar arquivos Prisma primeiro para gerar o cliente
 COPY prisma ./prisma/
 
@@ -62,9 +66,8 @@ COPY modified-server.js ./
 COPY start.sh ./
 RUN chmod +x ./start.sh
 
-# Copiar arquivos de ambiente
-COPY .env.railway ./
-COPY .env ./
+# Verificar a existência e conteúdo do arquivo .env
+RUN echo "Verificando arquivo .env:" && ls -la .env* && cat .env | grep -v "KEY\|SECRET\|PASSWORD"
 
 # Copiar o restante dos arquivos
 COPY . .
