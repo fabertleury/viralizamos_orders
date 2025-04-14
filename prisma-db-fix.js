@@ -153,7 +153,7 @@ async function fixDatabase() {
         ON DELETE SET NULL;
       `);
       console.log('Constraint Order_provider_id_fkey recriada com ON DELETE SET NULL.');
-    } else {
+  } else {
       console.log('A tabela Provider não existe. Constraint não foi recriada.');
     }
     
@@ -173,14 +173,14 @@ async function fixDatabase() {
         ON DELETE SET NULL;
       `);
       console.log('Constraint Order_user_id_fkey recriada com ON DELETE SET NULL.');
-    } else {
+      } else {
       console.log('A tabela User não existe. Constraint não foi recriada.');
     }
     
     console.log('Operação concluída com sucesso.');
   } catch (error) {
     console.error('Erro:', error);
-    process.exit(1);
+      process.exit(1);
   } finally {
     // Encerrar a conexão
     await pool.end();
@@ -196,5 +196,5 @@ fixDatabase()
   })
   .catch(err => {
     console.error('Falha ao executar o script:', err);
-    process.exit(1);
+  process.exit(1);
   }); 

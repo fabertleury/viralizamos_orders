@@ -61,4 +61,49 @@ export async function verify(request: NextRequest): Promise<VerifyResult> {
 export async function checkApiKey(request: NextRequest): Promise<boolean> {
   const result = await verify(request);
   return result.success;
+}
+
+/**
+ * Utilitário para autenticação e verificação de API keys
+ */
+
+/**
+ * Verifica se a API key fornecida no cabeçalho de autorização é válida
+ * @param authHeader O cabeçalho de autorização da requisição
+ * @returns true se a API key for válida, false caso contrário
+ */
+export function verifyApiKey(authHeader: string | null): boolean {
+  if (!authHeader) {
+    return false;
+  }
+
+  // Extrair a API key do cabeçalho
+  const apiKey = extractApiKey(authHeader);
+  
+  // Obter a API key esperada do arquivo .env
+  const expectedApiKey = process.env.ORDERS_API_KEY || '';
+  
+  // Verificar se a API key enviada corresponde à API key esperada
+  return apiKey === expectedApiKey;
+}
+
+/**
+ * Extrai a API key do cabeçalho de autorização
+ * @param authHeader O cabeçalho de autorização da requisição
+ * @returns A API key extraída do cabeçalho
+ */
+function extractApiKey(authHeader: string): string {
+  // O formato esperado é "Bearer API_KEY" ou "ApiKey API_KEY"
+  const parts = authHeader.split(' ');
+  
+  if (parts.length === 2) {
+    const [scheme, key] = parts;
+    
+    if (scheme === 'Bearer' || scheme === 'ApiKey') {
+      return key;
+    }
+  }
+  
+  // Se o cabeçalho não está no formato esperado, considere o cabeçalho inteiro como a API key
+  return authHeader;
 } 
