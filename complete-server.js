@@ -84,6 +84,21 @@ async function fetchServiceInfo(serviceId) {
   }
 }
 
+// Após a função fetchServiceInfo, adicionar função de utilidade para garantir que valores sejam strings
+
+/**
+ * Converte um valor para string, garantindo que o resultado não seja undefined ou null
+ * @param {any} value - Valor a ser convertido para string
+ * @param {string} defaultValue - Valor padrão se for undefined ou null
+ * @returns {string} - O valor convertido para string
+ */
+function ensureString(value, defaultValue = '') {
+  if (value === undefined || value === null) {
+    return defaultValue;
+  }
+  return String(value);
+}
+
 // Após a função fetchServiceInfo, adicionar função para buscar provedor pelo service_id no banco local
 
 /**
@@ -303,7 +318,7 @@ async function sendOrderToProvider(order) {
       data: {
         status: providerStatus,
         provider_response: detailedResponse,
-        external_order_id: externalOrderId || order.external_order_id,
+        external_order_id: externalOrderId ? ensureString(externalOrderId) : order.external_order_id,
         processed: true,
         processed_at: new Date()
       }
@@ -782,7 +797,7 @@ app.post('/api/orders/create', async (req, res) => {
                 await prisma.order.update({
                   where: { id: createdOrder.id },
                   data: {
-                    external_order_id: providerResponse.data.order,
+                    external_order_id: ensureString(providerResponse.data.order),
                     status: 'processing'
                   }
                 });
@@ -881,7 +896,7 @@ app.post('/api/orders/create', async (req, res) => {
               await prisma.order.update({
                 where: { id: createdOrder.id },
                 data: {
-                  external_order_id: providerResponse.data.order,
+                  external_order_id: ensureString(providerResponse.data.order),
                   status: 'processing'
                 }
               });
@@ -1212,7 +1227,7 @@ app.post('/api/orders/batch', async (req, res) => {
               await prisma.order.update({
                 where: { id: createdOrder.id },
                 data: {
-                  external_order_id: providerResponse.data.order,
+                  external_order_id: ensureString(providerResponse.data.order),
                   status: 'processing'
                 }
               });
@@ -1505,10 +1520,11 @@ app.post('/api/orders/:id/process', async (req, res) => {
           provider_response: providerResponse, // Salvar a resposta completa do provedor
           processed: true,
           processed_at: new Date(),
+          external_order_id: providerResponse.order ? ensureString(providerResponse.order) : null,
           metadata: {
             ...order.metadata,
             provider_processing: {
-              provider_order_id: providerResponse.order || null,
+              provider_order_id: providerResponse.order ? ensureString(providerResponse.order) : null,
               sent_at: new Date().toISOString(),
               provider_response: providerResponse
             }
@@ -1633,10 +1649,11 @@ app.post('/api/orders/process-by-transaction/:transactionId', async (req, res) =
             provider_response: providerResponse, // Salvar a resposta completa do provedor
             processed: true,
             processed_at: new Date(),
+            external_order_id: ensureString(providerResponse.order),
             metadata: {
               ...order.metadata,
               provider_processing: {
-                provider_order_id: providerResponse.order || null,
+                provider_order_id: ensureString(providerResponse.order),
                 sent_at: new Date().toISOString(),
                 provider_response: providerResponse
               }
