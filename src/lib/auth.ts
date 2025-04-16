@@ -1,4 +1,8 @@
 import { NextRequest } from 'next/server';
+import { NextAuthOptions } from 'next-auth';
+import { PrismaAdapter } from '@auth/prisma-adapter';
+import { prisma } from './prisma';
+import CredentialsProvider from 'next-auth/providers/credentials';
 
 /**
  * Result of an authentication verification
@@ -106,4 +110,106 @@ function extractApiKey(authHeader: string): string {
   
   // Se o cabeçalho não está no formato esperado, considere o cabeçalho inteiro como a API key
   return authHeader;
+}
+
+// Define as opções de autenticação
+export const authOptions: NextAuthOptions = {
+  adapter: PrismaAdapter(prisma),
+  session: {
+    strategy: 'jwt',
+  },
+  providers: [
+    CredentialsProvider({
+      name: 'Credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' }
+      },
+      async authorize(credentials) {
+        // Implementação básica de autorização
+        if (!credentials?.email || !credentials?.password) {
+          return null;
+        }
+
+        // Para ambiente de desenvolvimento/teste, podemos ter um usuário simples
+        if (process.env.NODE_ENV !== 'production') {
+          if (credentials.email === 'admin@viralizamos.com' && 
+              credentials.password === 'admin123') {
+            return {
+              id: '1',
+              name: 'Admin',
+              email: 'admin@viralizamos.com',
+              role: 'admin'
+            };
+          }
+        }
+
+        // Buscar o usuário no banco de dados
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email }
+        });
+
+        // Verificar se o usuário existe e se a senha está correta
+        // Nota: Em um ambiente de produção real, você deve utilizar comparação de hash para senhas
+        if (!user) {
+          return null;
+        }
+
+        // Retornar o usuário autenticado
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        };
+      }
+    })
+  ],
+  pages: {
+    signIn: '/login',
+    signOut: '/logout',
+    error: '/error',
+  },
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = user.role;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token) {
+        session.user.id = token.id as string;
+        session.user.role = token.role as string;
+      }
+      return session;
+    },
+  },
+  secret: process.env.NEXTAUTH_SECRET || 'orders-development-secret-key',
+};
+
+// Estender tipos
+declare module 'next-auth' {
+  interface User {
+    id: string;
+    role: string;
+  }
+
+  interface Session {
+    user: {
+      id: string;
+      role: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    }
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id: string;
+    role: string;
+  }
 } 

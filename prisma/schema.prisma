@@ -18,6 +18,7 @@ model User {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
   orders     Order[]
+  reposicoes Reposicao[]
   
   @@index([email])
   @@index([role])
@@ -63,6 +64,7 @@ model Order {
   provider           Provider?  @relation(fields: [provider_id], references: [id])
   user               User?      @relation(fields: [user_id], references: [id])
   logs               OrderLog[]
+  reposicoes         Reposicao[]
   
   @@index([transaction_id])
   @@index([status])
@@ -121,4 +123,27 @@ model Category {
   
   @@index([slug])
   @@index([status])
+}
+
+model Reposicao {
+  id            String    @id @default(uuid())
+  order_id      String
+  user_id       String?
+  status        String    @default("pending") // pending, processing, completed, failed
+  motivo        String?
+  observacoes   String?
+  data_solicitacao DateTime @default(now())
+  data_processamento DateTime?
+  data_limite   DateTime   // Data limite para solicitar (30 dias após a compra)
+  tentativas    Int        @default(1)
+  processado_por String?   // ID do admin que processou a solicitação
+  resposta      String?    // Resposta do admin ao processar
+  metadata      Json?
+  order         Order     @relation(fields: [order_id], references: [id])
+  user          User?     @relation(fields: [user_id], references: [id])
+  
+  @@index([order_id])
+  @@index([status])
+  @@index([user_id])
+  @@index([data_solicitacao])
 } 
