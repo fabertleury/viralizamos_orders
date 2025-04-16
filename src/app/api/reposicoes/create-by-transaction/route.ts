@@ -10,171 +10,163 @@ import { enqueueReposicao } from '@/lib/queue';
  */
 export async function POST(request: NextRequest) {
   try {
-    const { transaction_id, motivo, observacoes, external_service_id } = await request.json();
+    const body = await request.json();
+    const { transaction_id, motivo, observacoes } = body;
     
+    // Validar campos obrigatórios
     if (!transaction_id) {
       return NextResponse.json(
-        { error: 'É necessário fornecer o transaction_id para criar a reposição' },
+        { error: 'ID da transação é obrigatório' },
         { status: 400 }
       );
     }
     
     if (!motivo) {
       return NextResponse.json(
-        { error: 'É necessário fornecer o motivo para criar a reposição' },
+        { error: 'Motivo da reposição é obrigatório' },
         { status: 400 }
       );
     }
     
-    console.log(`[API] Buscando pedido pelo transaction_id: ${transaction_id}`);
-    
-    // Buscar o pedido pelo transaction_id
-    const order = await prisma.order.findFirst({
-      where: { 
-        transaction_id 
+    // Buscar o pedido pelo ID da transação
+    const order = await prisma.order.findUnique({
+      where: { transaction_id },
+      include: {
+        reposicoes: {
+          where: {
+            status: {
+              in: ['pending', 'processing']
+            }
+          }
+        }
       }
     });
     
     if (!order) {
-      console.error(`[API] Pedido não encontrado para o transaction_id: ${transaction_id}`);
+      console.log(`Pedido não encontrado para transaction_id: ${transaction_id}`);
       return NextResponse.json(
-        { error: 'Pedido não encontrado para o transaction_id fornecido' },
+        { error: 'Pedido não encontrado' },
         { status: 404 }
       );
     }
     
-    console.log(`[API] Pedido encontrado: ${order.id}`);
+    console.log(`Pedido encontrado: ${order.id}, status: ${order.status}`);
     
-    // Se o external_service_id foi fornecido e o pedido não tem um, atualizar
-    if (external_service_id && !order.external_service_id) {
-      console.log(`[API] Atualizando external_service_id do pedido ${order.id} para: ${external_service_id}`);
-      
-      // Atualizar o pedido com o external_service_id fornecido
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { 
-          external_service_id 
-        }
-      });
-      
-      // Registrar no log do pedido
-      await prisma.orderLog.create({
-        data: {
-          order_id: order.id,
-          level: 'info',
-          message: `External service ID atualizado: ${external_service_id}`,
-          data: {
-            previous_external_service_id: order.external_service_id,
-            new_external_service_id: external_service_id,
-            source: 'reposicao_api'
-          }
-        }
-      });
-    } else if (!order.external_service_id && !external_service_id) {
-      // Avisar se não há external_service_id
-      console.warn(`[API] Atenção: Pedido ${order.id} não possui external_service_id para reposição`);
-    }
-    
-    // Verificar se o pedido já foi concluído
+    // Verificar se o pedido está concluído
     if (order.status !== 'completed') {
-      console.warn(`[API] Pedido ${order.id} não está com status 'completed', atual: ${order.status}`);
-      
-      // Podemos optar por permitir ou não a reposição para pedidos não concluídos
-      // Por enquanto, vamos permitir, mas logando um aviso
+      console.log(`Pedido ${order.id} não está concluído (status: ${order.status})`);
+      return NextResponse.json(
+        { error: 'Reposição só pode ser solicitada para pedidos concluídos' },
+        { status: 400 }
+      );
     }
     
     // Verificar se já existe uma reposição pendente para este pedido
-    const existingReposicao = await prisma.reposicao.findFirst({
-      where: {
-        order_id: order.id,
-        status: {
-          in: ['pending', 'processing']
-        }
-      }
-    });
-    
-    if (existingReposicao) {
-      console.log(`[API] Já existe uma reposição pendente para o pedido ${order.id}: ${existingReposicao.id}`);
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Já existe uma reposição pendente para este pedido',
-        reposicao: existingReposicao
-      });
+    if (order.reposicoes.length > 0) {
+      console.log(`Já existe reposição pendente para o pedido ${order.id}: ${order.reposicoes[0].id}`);
+      return NextResponse.json(
+        { 
+          error: 'Já existe uma reposição pendente para este pedido',
+          reposicao_id: order.reposicoes[0].id
+        },
+        { status: 400 }
+      );
     }
     
-    // Calcular a data limite (30 dias após a criação do pedido)
-    const dataLimite = new Date(order.created_at);
-    dataLimite.setDate(dataLimite.getDate() + 30);
+    // Verificar se passou o tempo mínimo desde a conclusão do pedido (normalmente 24h)
+    const completedAt = order.completed_at || order.updated_at;
+    if (completedAt) {
+      const hoursElapsed = (Date.now() - new Date(completedAt).getTime()) / (1000 * 60 * 60);
+      console.log(`Horas desde a conclusão do pedido: ${hoursElapsed.toFixed(2)}`);
+      
+      // Se não passou 24h, não permitir reposição
+      if (hoursElapsed < 24) {
+        return NextResponse.json(
+          { 
+            error: 'É necessário aguardar 24 horas após a conclusão do pedido para solicitar reposição',
+            hours_elapsed: Math.floor(hoursElapsed),
+            hours_remaining: Math.ceil(24 - hoursElapsed)
+          },
+          { status: 400 }
+        );
+      }
+    }
     
-    // Criar a reposição
-    console.log(`[API] Criando reposição para o pedido ${order.id}`);
+    // Obter informações do usuário que está fazendo a solicitação
+    const token = await getToken({ req: request });
+    const userId = token?.sub;
     
+    // Criar nova reposição
     const reposicao = await prisma.reposicao.create({
       data: {
         order_id: order.id,
-        user_id: order.user_id,
         status: 'pending',
         motivo,
-        observacoes: observacoes || '',
+        observacoes,
+        solicitado_por: userId || 'system',
         data_solicitacao: new Date(),
-        data_limite: dataLimite,
-        tentativas: 1,
         metadata: {
-          source: 'transaction_id_api',
-          ip: request.ip || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown',
-          provided_external_service_id: external_service_id || null
+          source: 'transaction-api',
+          transaction_id
         }
       }
     });
     
-    console.log(`[API] Reposição criada com sucesso: ${reposicao.id}`);
+    console.log(`Reposição criada: ${reposicao.id} para o pedido ${order.id}`);
     
-    // Registrar a criação da reposição nos logs do pedido
+    // Registrar log
     await prisma.orderLog.create({
       data: {
         order_id: order.id,
+        message: `Reposição solicitada via API de transação: ${motivo}`,
         level: 'info',
-        message: `Solicitação de reposição criada: ${reposicao.id}`,
         data: {
           reposicao_id: reposicao.id,
+          transaction_id,
           motivo,
-          observacoes,
-          external_service_id: order.external_service_id || external_service_id || null
+          observacoes
         }
       }
     });
     
-    // Adicionar à fila de processamento
+    // Enfileirar a reposição para processamento assíncrono com alta prioridade
     try {
-      await enqueueReposicao(
-        reposicao.id,
-        order.id,
-        order.user_id,
-        5 // Prioridade média (5) para reposições via API
-      );
+      const job = await enqueueReposicao(reposicao.id, order.id, undefined, 10); // Alta prioridade (10)
       
-      console.log(`Solicitação de reposição #${reposicao.id} adicionada à fila de processamento`);
-    } catch (queueError) {
-      // Não falhar se a fila não estiver disponível
-      console.error('Erro ao adicionar à fila de processamento:', queueError);
+      console.log(`Reposição ${reposicao.id} enfileirada para processamento, job_id: ${job.id}`);
+      
+      // Atualizar o metadata da reposição com o ID do job
+      await prisma.reposicao.update({
+        where: { id: reposicao.id },
+        data: {
+          metadata: {
+            ...reposicao.metadata,
+            job_id: job.id
+          }
+        }
+      });
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Reposição solicitada com sucesso',
+        reposicao_id: reposicao.id,
+        job_id: job.id
+      });
+    } catch (error) {
+      console.error('Erro ao enfileirar reposição:', error);
+      
+      // Ainda retornar sucesso, mas informar que será processada manualmente
+      return NextResponse.json({
+        success: true,
+        message: 'Reposição solicitada com sucesso (será processada manualmente)',
+        reposicao_id: reposicao.id,
+        queue_error: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
     }
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Reposição criada com sucesso e adicionada à fila de processamento',
-      reposicao
-    });
-    
   } catch (error) {
-    console.error('[API] Erro ao criar reposição:', error);
-    
+    console.error('Erro ao processar solicitação de reposição:', error);
     return NextResponse.json(
-      { 
-        error: error instanceof Error ? error.message : 'Erro interno do servidor',
-        details: 'Não foi possível criar a reposição'
-      },
+      { error: 'Erro ao processar solicitação de reposição' },
       { status: 500 }
     );
   }

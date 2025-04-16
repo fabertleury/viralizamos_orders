@@ -5,8 +5,9 @@ import { authOptions } from '@/lib/auth';
 import axios from 'axios';
 import { processReposicaoQueue, enqueueReposicao } from '@/lib/queue';
 
-const MAIN_SYSTEM_API_URL = process.env.MAIN_SYSTEM_API_URL || 'https://api.viralizamos.com.br';
-const API_KEY = process.env.API_KEY || 'default-key';
+// Remove MAIN_SYSTEM_API_URL and API_KEY variables since we're processing directly
+// const MAIN_SYSTEM_API_URL = process.env.MAIN_SYSTEM_API_URL || 'https://api.viralizamos.com.br';
+// const API_KEY = process.env.API_KEY || 'default-key';
 
 // POST /api/reposicoes/processar - Processar uma reposição automaticamente
 export async function POST(request: NextRequest) {
@@ -153,58 +154,63 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Integrar com a API do sistema principal para criar a reposição
+    // Processar reposição diretamente no microserviço de orders
     try {
-      // Conforme exemplos da API, fazer solicitação de reposição
-      const refillResponse = await axios.post(`${MAIN_SYSTEM_API_URL}/api/v2`, {
-        key: API_KEY,
-        action: 'refill',
-        order: order.external_order_id
+      // Verifica o provedor do pedido para processar a reposição corretamente
+      if (!order.provider) {
+        throw new Error('Provedor do pedido não encontrado');
+      }
+
+      let refillResult;
+      
+      // Processar baseado no provider_id ou slug do provedor
+      if (order.provider.slug === 'smm-panel-a' || order.provider.slug === 'smm-panel-b') {
+        // Processar diretamente usando a API do provedor
+        refillResult = await processProviderRefill(order, order.provider);
+      } else {
+        // Provedor não suporta reposição automatizada
+        throw new Error(`Provedor ${order.provider.name} não suporta reposição automatizada`);
+      }
+
+      // Atualizar a reposição com sucesso
+      const updatedReposicao = await prisma.reposicao.update({
+        where: { id: reposicao.id },
+        data: {
+          status: 'completed',
+          resposta: 'Reposição criada com sucesso',
+          metadata: {
+            ...reposicao.metadata,
+            refill_id: refillResult.refill_id,
+            refill_response: refillResult,
+            job_id: job_id
+          },
+          data_processamento: new Date()
+        }
       });
 
-      if (refillResponse.data && refillResponse.data.refill) {
-        // Atualizar a reposição com sucesso
-        const updatedReposicao = await prisma.reposicao.update({
-          where: { id: reposicao.id },
+      // Registrar no log
+      await prisma.orderLog.create({
+        data: {
+          order_id: reposicao.order_id,
+          level: 'info',
+          message: `Reposição #${reposicao.id} processada com sucesso${isQueueProcessing ? ' (via fila)' : ''}`,
           data: {
-            status: 'completed',
-            resposta: 'Reposição criada com sucesso',
-            metadata: {
-              ...reposicao.metadata,
-              refill_id: refillResponse.data.refill,
-              refill_response: refillResponse.data,
-              job_id: job_id
-            },
-            data_processamento: new Date()
+            reposicao_id: reposicao.id,
+            refill_id: refillResult.refill_id,
+            processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
+            job_id: job_id
           }
-        });
+        }
+      });
 
-        // Registrar no log
-        await prisma.orderLog.create({
-          data: {
-            order_id: reposicao.order_id,
-            level: 'info',
-            message: `Reposição #${reposicao.id} processada com sucesso${isQueueProcessing ? ' (via fila)' : ''}`,
-            data: {
-              reposicao_id: reposicao.id,
-              refill_id: refillResponse.data.refill,
-              processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
-              job_id: job_id
-            }
-          }
-        });
-
-        return NextResponse.json({
-          success: true,
-          message: 'Reposição processada com sucesso',
-          reposicao: updatedReposicao,
-          refill: refillResponse.data
-        });
-      } else {
-        throw new Error('Resposta do sistema principal não contém ID da reposição');
-      }
+      return NextResponse.json({
+        success: true,
+        message: 'Reposição processada com sucesso',
+        reposicao: updatedReposicao,
+        refill: refillResult
+      });
     } catch (error) {
-      console.error('Erro ao processar reposição no sistema principal:', error);
+      console.error('Erro ao processar reposição:', error);
       
       // Atualizar a reposição com falha
       const updatedReposicao = await prisma.reposicao.update({
@@ -250,5 +256,61 @@ export async function POST(request: NextRequest) {
       { error: 'Erro ao processar reposição' },
       { status: 500 }
     );
+  }
+}
+
+// Função para processar reposição diretamente com o provedor
+async function processProviderRefill(order: any, provider: any) {
+  // Implemente a lógica específica para cada provedor
+  try {
+    if (provider.slug === 'smm-panel-a') {
+      // Exemplo para SMM Panel A
+      const apiUrl = provider.api_url;
+      const apiKey = provider.api_key;
+      
+      const response = await axios.post(apiUrl, {
+        key: apiKey,
+        action: 'refill',
+        order: order.external_order_id
+      });
+      
+      if (response.data && response.data.refill) {
+        return {
+          success: true,
+          refill_id: response.data.refill,
+          provider: provider.slug,
+          raw_response: response.data
+        };
+      } else {
+        throw new Error(`Resposta inválida do provedor ${provider.slug}`);
+      }
+    } 
+    else if (provider.slug === 'smm-panel-b') {
+      // Exemplo para SMM Panel B
+      const apiUrl = provider.api_url;
+      const apiKey = provider.api_key;
+      
+      const response = await axios.post(apiUrl, {
+        api_key: apiKey,
+        method: 'create_refill',
+        order_id: order.external_order_id
+      });
+      
+      if (response.data && response.data.status === 'success') {
+        return {
+          success: true,
+          refill_id: response.data.refill_id,
+          provider: provider.slug,
+          raw_response: response.data
+        };
+      } else {
+        throw new Error(`Resposta inválida do provedor ${provider.slug}: ${response.data?.message || 'Sem mensagem'}`);
+      }
+    }
+    
+    throw new Error(`Provedor não implementado: ${provider.slug}`);
+  } catch (error) {
+    console.error(`Erro ao processar reposição com o provedor ${provider.slug}:`, error);
+    throw error;
   }
 } 
