@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
     const transactionId = searchParams.get('transaction_id');
     const externalOrderId = searchParams.get('external_order_id');
     const orderId = searchParams.get('id');
+    const exactMatch = searchParams.get('exact') === 'true';
 
     // Pelo menos um parâmetro é necessário
     if (!transactionId && !externalOrderId && !orderId) {
@@ -24,14 +25,66 @@ export async function GET(request: NextRequest) {
     }
     
     if (transactionId) {
-      whereClause.transaction_id = transactionId;
+      // Verificar se devemos fazer uma busca exata ou flexível
+      if (exactMatch) {
+        whereClause.transaction_id = transactionId;
+      } else {
+        // Busca insensitiva a maiúsculas/minúsculas e permite correspondência parcial
+        whereClause.transaction_id = {
+          contains: transactionId,
+          mode: 'insensitive'
+        };
+      }
     }
     
     if (externalOrderId) {
       whereClause.external_order_id = externalOrderId;
     }
 
-    // Buscar a ordem
+    // Verificar se o modo de debug está ativado para retornar múltiplos resultados
+    const debug = searchParams.get('debug') === 'true';
+    if (debug) {
+      const orders = await prisma.order.findMany({
+        where: whereClause,
+        take: 5,
+        include: {
+          provider: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              api_url: true
+            }
+          },
+          logs: {
+            orderBy: {
+              created_at: 'desc'
+            },
+            take: 5
+          },
+          reposicoes: {
+            orderBy: {
+              data_solicitacao: 'desc'
+            }
+          }
+        }
+      });
+
+      if (orders.length === 0) {
+        return NextResponse.json(
+          { error: 'Pedido não encontrado' },
+          { status: 404 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        count: orders.length,
+        orders
+      });
+    }
+
+    // Comportamento padrão: buscar apenas o primeiro resultado
     const order = await prisma.order.findFirst({
       where: whereClause,
       include: {

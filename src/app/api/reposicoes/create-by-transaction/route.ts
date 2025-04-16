@@ -9,7 +9,7 @@ import { enqueueReposicao } from '@/lib/queue';
  */
 export async function POST(request: NextRequest) {
   try {
-    const { transaction_id, motivo, observacoes } = await request.json();
+    const { transaction_id, motivo, observacoes, external_service_id } = await request.json();
     
     if (!transaction_id) {
       return NextResponse.json(
@@ -43,6 +43,36 @@ export async function POST(request: NextRequest) {
     }
     
     console.log(`[API] Pedido encontrado: ${order.id}`);
+    
+    // Se o external_service_id foi fornecido e o pedido não tem um, atualizar
+    if (external_service_id && !order.external_service_id) {
+      console.log(`[API] Atualizando external_service_id do pedido ${order.id} para: ${external_service_id}`);
+      
+      // Atualizar o pedido com o external_service_id fornecido
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { 
+          external_service_id 
+        }
+      });
+      
+      // Registrar no log do pedido
+      await prisma.orderLog.create({
+        data: {
+          order_id: order.id,
+          level: 'info',
+          message: `External service ID atualizado: ${external_service_id}`,
+          data: {
+            previous_external_service_id: order.external_service_id,
+            new_external_service_id: external_service_id,
+            source: 'reposicao_api'
+          }
+        }
+      });
+    } else if (!order.external_service_id && !external_service_id) {
+      // Avisar se não há external_service_id
+      console.warn(`[API] Atenção: Pedido ${order.id} não possui external_service_id para reposição`);
+    }
     
     // Verificar se o pedido já foi concluído
     if (order.status !== 'completed') {
@@ -92,7 +122,8 @@ export async function POST(request: NextRequest) {
         metadata: {
           source: 'transaction_id_api',
           ip: request.ip || 'unknown',
-          userAgent: request.headers.get('user-agent') || 'unknown'
+          userAgent: request.headers.get('user-agent') || 'unknown',
+          provided_external_service_id: external_service_id || null
         }
       }
     });
@@ -108,7 +139,8 @@ export async function POST(request: NextRequest) {
         data: {
           reposicao_id: reposicao.id,
           motivo,
-          observacoes
+          observacoes,
+          external_service_id: order.external_service_id || external_service_id || null
         }
       }
     });

@@ -176,15 +176,38 @@ export async function processReposicaoQueue() {
       });
 
       // Verificar se o pedido tem ID externo (necessário para reposição)
-      if (!reposicao.order.external_order_id) {
-        throw new Error('Pedido sem ID externo no provedor');
+      if (!reposicao.order.external_service_id && !reposicao.order.external_order_id) {
+        throw new Error('Pedido sem ID externo de serviço ou ordem para reposição');
       }
+
+      // Priorizar o external_service_id, mas usar external_order_id como fallback
+      const externalId = reposicao.order.external_service_id || reposicao.order.external_order_id;
+      console.log(`[Queue] Usando ID externo para reposição: ${externalId} (tipo: ${reposicao.order.external_service_id ? 'service_id' : 'order_id'})`);
 
       // Lógica para processar a reposição
       // Integrações com provedores externos, etc.
       
       // Aqui seria implementada a lógica específica de cada provedor
       // Exemplo: integração com um provedor de mídia social
+      
+      // Simular chamada ao provedor com o ID correto
+      console.log(`[Queue] Enviando solicitação de reposição para o provedor com ID: ${externalId}`);
+      
+      // Registrar nos logs o ID usado para reposição
+      await prisma.orderLog.create({
+        data: {
+          order_id: job.orderId,
+          level: 'info',
+          message: `Enviando reposição ao provedor com ID externo: ${externalId}`,
+          data: {
+            job_id: job.id,
+            provider: reposicao.order.provider?.name || 'desconhecido',
+            external_service_id: reposicao.order.external_service_id,
+            external_order_id: reposicao.order.external_order_id,
+            id_usado: externalId
+          }
+        }
+      });
       
       // Para fins de demonstração, estamos apenas simulando o processamento bem-sucedido
       
@@ -193,7 +216,7 @@ export async function processReposicaoQueue() {
         where: { id: job.reposicaoId },
         data: {
           status: 'completed',
-          resposta: 'Reposição processada com sucesso',
+          resposta: `Reposição processada com sucesso usando ID: ${externalId}`,
           data_processamento: new Date()
         }
       });
