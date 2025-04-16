@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { getToken } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { enqueueReposicao } from '@/lib/queue';
 
@@ -145,20 +146,19 @@ export async function POST(request: NextRequest) {
       }
     });
     
-    // Adicionar a reposição à fila de processamento
+    // Adicionar à fila de processamento
     try {
-      await enqueueReposicao({
-        reposicaoId: reposicao.id,
-        orderId: order.id,
-        userId: order.user_id || undefined,
-        priority: 'high' // Prioridade alta para solicitações explícitas do cliente
-      });
+      await enqueueReposicao(
+        reposicao.id,
+        order.id,
+        order.user_id,
+        5 // Prioridade média (5) para reposições via API
+      );
       
-      console.log(`[API] Reposição ${reposicao.id} adicionada à fila de processamento`);
+      console.log(`Solicitação de reposição #${reposicao.id} adicionada à fila de processamento`);
     } catch (queueError) {
-      console.error(`[API] Erro ao adicionar reposição ${reposicao.id} à fila:`, queueError);
-      // Não falhar a solicitação caso haja erro na fila, apenas registrar o erro
-      // A reposição ainda está criada no banco, mas terá que ser processada manualmente
+      // Não falhar se a fila não estiver disponível
+      console.error('Erro ao adicionar à fila de processamento:', queueError);
     }
     
     return NextResponse.json({

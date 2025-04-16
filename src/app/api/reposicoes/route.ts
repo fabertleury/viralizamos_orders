@@ -208,12 +208,12 @@ export async function POST(request: NextRequest) {
 
     // Adicionar a solicitação à fila de processamento
     try {
-      await enqueueReposicao({
-        reposicaoId: reposicao.id,
-        orderId: order_id,
-        userId: session?.user?.id || order.user_id,
-        priority: 'high' // Alta prioridade para reposições solicitadas por clientes
-      });
+      await enqueueReposicao(
+        reposicao.id,
+        order_id,
+        session?.user?.id || order.user_id,
+        10 // Alta prioridade (10) para reposições solicitadas por clientes
+      );
       
       console.log(`Solicitação de reposição #${reposicao.id} adicionada à fila de processamento`);
     } catch (queueError) {

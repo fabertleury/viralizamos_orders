@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import axios from 'axios';
+import { processReposicaoQueue, enqueueReposicao } from '@/lib/queue';
 
 const MAIN_SYSTEM_API_URL = process.env.MAIN_SYSTEM_API_URL || 'https://api.viralizamos.com.br';
 const API_KEY = process.env.API_KEY || 'default-key';
@@ -36,7 +37,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { reposicao_id, order_id, status, resposta } = body;
+    const { reposicao_id, order_id, status, resposta, job_id } = body;
+
+    // Se temos um job_id, então esta chamada está vindo da fila
+    const isQueueProcessing = !!job_id;
 
     if (!reposicao_id && !order_id) {
       return NextResponse.json(
@@ -71,6 +75,26 @@ export async function POST(request: NextRequest) {
         { error: 'Reposição não encontrada' },
         { status: 404 }
       );
+    }
+
+    // Se não está vindo da fila e não é uma solicitação para processar imediatamente,
+    // enfileirar para processamento assíncrono
+    if (!isQueueProcessing && !body.process_now) {
+      try {
+        const job = await enqueueReposicao(reposicao.id, reposicao.order_id, session?.user?.id);
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Reposição enfileirada para processamento',
+          job_id: job.id,
+          reposicao_id: reposicao.id
+        });
+      } catch (error) {
+        console.error('Erro ao enfileirar reposição:', error);
+        
+        // Continuar com o processamento síncrono se falhar o enfileiramento
+        console.log('Continuando com processamento síncrono devido a falha na fila');
+      }
     }
 
     // Buscar o pedido original para obter dados necessários para reposição
@@ -110,7 +134,7 @@ export async function POST(request: NextRequest) {
       where: { id: reposicao.id },
       data: {
         status: 'processing',
-        processado_por: session?.user?.id || 'system',
+        processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
         data_processamento: new Date()
       }
     });
@@ -120,10 +144,11 @@ export async function POST(request: NextRequest) {
       data: {
         order_id: reposicao.order_id,
         level: 'info',
-        message: `Iniciando processamento da reposição #${reposicao.id}`,
+        message: `Iniciando processamento da reposição #${reposicao.id}${isQueueProcessing ? ' (via fila)' : ''}`,
         data: {
           reposicao_id: reposicao.id,
-          processado_por: session?.user?.id || 'system'
+          processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
+          job_id: job_id
         }
       }
     });
@@ -147,7 +172,8 @@ export async function POST(request: NextRequest) {
             metadata: {
               ...reposicao.metadata,
               refill_id: refillResponse.data.refill,
-              refill_response: refillResponse.data
+              refill_response: refillResponse.data,
+              job_id: job_id
             },
             data_processamento: new Date()
           }
@@ -158,11 +184,12 @@ export async function POST(request: NextRequest) {
           data: {
             order_id: reposicao.order_id,
             level: 'info',
-            message: `Reposição #${reposicao.id} processada com sucesso`,
+            message: `Reposição #${reposicao.id} processada com sucesso${isQueueProcessing ? ' (via fila)' : ''}`,
             data: {
               reposicao_id: reposicao.id,
               refill_id: refillResponse.data.refill,
-              processado_por: session?.user?.id || 'system'
+              processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
+              job_id: job_id
             }
           }
         });
@@ -188,7 +215,8 @@ export async function POST(request: NextRequest) {
           metadata: {
             ...reposicao.metadata,
             error: error instanceof Error ? error.message : 'Erro desconhecido',
-            error_timestamp: new Date().toISOString()
+            error_timestamp: new Date().toISOString(),
+            job_id: job_id
           },
           data_processamento: new Date()
         }
@@ -199,11 +227,12 @@ export async function POST(request: NextRequest) {
         data: {
           order_id: reposicao.order_id,
           level: 'error',
-          message: `Falha ao processar reposição #${reposicao.id}`,
+          message: `Falha ao processar reposição #${reposicao.id}${isQueueProcessing ? ' (via fila)' : ''}`,
           data: {
             reposicao_id: reposicao.id,
             error: error instanceof Error ? error.message : 'Erro desconhecido',
-            processado_por: session?.user?.id || 'system'
+            processado_por: session?.user?.id || (isQueueProcessing ? 'queue' : 'system'),
+            job_id: job_id
           }
         }
       });

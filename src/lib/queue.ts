@@ -1,15 +1,18 @@
 import { Redis } from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from './prisma';
+import axios from 'axios';
 
 // Configuração do Redis
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const redisClient = new Redis(redisUrl);
-
-// Nome da fila de reposições
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const redis = new Redis(REDIS_URL);
 const REPOSICAO_QUEUE = process.env.REPOSICAO_QUEUE || 'reposicao-processing-queue';
+const QUEUE_MAX_RETRY_ATTEMPTS = parseInt(process.env.QUEUE_MAX_RETRY_ATTEMPTS || '3', 10);
+const QUEUE_BACKOFF_DELAY = parseInt(process.env.QUEUE_BACKOFF_DELAY || '5000', 10); // 5 segundos de base para backoff
+const QUEUE_PROCESSING_INTERVAL = parseInt(process.env.QUEUE_PROCESSING_INTERVAL || '60000', 10); // 1 minuto padrão
+const QUEUE_CONCURRENCY = parseInt(process.env.QUEUE_CONCURRENCY || '3', 10);
 
-// Estrutura do Job de reposição
+// Interface para os jobs de reposição
 interface ReposicaoJob {
   id: string;
   reposicaoId: string;
@@ -19,296 +22,310 @@ interface ReposicaoJob {
   attempts: number;
   maxAttempts: number;
   createdAt: string;
-  processAfter?: string;
-}
-
-// Interface para parâmetros da função enqueueReposicao
-interface EnqueueReposicaoParams {
-  reposicaoId: string;
-  orderId: string;
-  userId?: string;
-  priority?: number | 'high' | 'medium' | 'low';
+  processAfter: string;
 }
 
 /**
- * Adiciona um job de processamento de reposição à fila
- * @param params Objeto com os parâmetros da reposição ou ID da reposição
- * @param orderId ID do pedido associado à reposição (quando params for string)
- * @param userId ID do usuário que solicitou a reposição (opcional, quando params for string)
- * @param priority Prioridade do job (menor = maior prioridade, quando params for string)
- * @returns O job criado
+ * Adiciona uma reposição à fila de processamento
  */
 export async function enqueueReposicao(
-  params: string | EnqueueReposicaoParams,
-  orderId?: string,
+  reposicaoId: string,
+  orderId: string,
   userId?: string,
-  priority: number = 10
+  options: {
+    priority?: number;
+    maxAttempts?: number;
+    delayMs?: number;
+  } = {}
 ): Promise<ReposicaoJob> {
-  // Determinar os valores com base no tipo do primeiro parâmetro
-  let reposicaoId: string;
-  let jobPriority: number;
-  let jobUserId: string | undefined;
-  let jobOrderId: string;
+  // Create a unique job ID
+  const jobId = uuidv4();
   
-  // Verificar se estamos usando a versão com objeto ou a versão com argumentos individuais
-  if (typeof params === 'string') {
-    // Versão original com argumentos separados
-    reposicaoId = params;
-    jobOrderId = orderId as string;
-    jobUserId = userId;
-    jobPriority = priority;
-  } else {
-    // Versão nova com objeto
-    reposicaoId = params.reposicaoId;
-    jobOrderId = params.orderId;
-    jobUserId = params.userId;
-    
-    // Converter prioridade textual para numérica se necessário
-    if (params.priority === 'high') {
-      jobPriority = 5;
-    } else if (params.priority === 'medium') {
-      jobPriority = 10;
-    } else if (params.priority === 'low') {
-      jobPriority = 15;
-    } else {
-      jobPriority = params.priority || 10;
-    }
-  }
+  // Set default options
+  const priority = options.priority ?? 0; // Higher number = higher priority
+  const maxAttempts = options.maxAttempts ?? QUEUE_MAX_RETRY_ATTEMPTS;
+  const delayMs = options.delayMs ?? 0;
   
-  // Validação básica
-  if (!reposicaoId || !jobOrderId) {
-    throw new Error('IDs de reposição e pedido são obrigatórios');
-  }
-
-  // Criar o job de reposição
+  // Calculate process after time (for delayed jobs)
+  const now = new Date();
+  const processAfter = new Date(now.getTime() + delayMs);
+  
+  // Create the job
   const job: ReposicaoJob = {
-    id: uuidv4(),
+    id: jobId,
     reposicaoId,
-    orderId: jobOrderId,
-    userId: jobUserId,
-    priority: jobPriority,
+    orderId,
+    userId,
+    priority,
     attempts: 0,
-    maxAttempts: Number(process.env.QUEUE_MAX_RETRY_ATTEMPTS || 3),
-    createdAt: new Date().toISOString(),
+    maxAttempts,
+    createdAt: now.toISOString(),
+    processAfter: processAfter.toISOString(),
   };
-
-  // Adicionar o job à fila de prioridade no Redis
-  await redisClient.zadd(
+  
+  // Add the job to Redis
+  await redis.zadd(
     REPOSICAO_QUEUE,
-    jobPriority, // Score (prioridade)
-    JSON.stringify(job) // Valor (job serializado)
+    priority, // Score (priority)
+    JSON.stringify(job) // Value (job data)
   );
-
-  console.log(`[Queue] Job de reposição ${job.id} adicionado à fila para reposição ${reposicaoId}`);
+  
+  console.log(`[Queue] Adicionado job de reposição à fila: ${jobId} para reposição ${reposicaoId}`);
+  
+  // Registrar no log
+  await prisma.orderLog.create({
+    data: {
+      order_id: orderId,
+      level: 'info',
+      message: `Reposição #${reposicaoId} enfileirada para processamento (Job #${jobId})`,
+      data: {
+        reposicao_id: reposicaoId,
+        job_id: jobId,
+        priority,
+        processAfter: processAfter.toISOString(),
+      }
+    }
+  });
+  
   return job;
 }
 
 /**
- * Processa os jobs de reposição na fila
- * Deve ser chamado periodicamente por um scheduler ou cron job
+ * Processa jobs da fila de reposições
  */
 export async function processReposicaoQueue() {
-  console.log('[Queue] Iniciando processamento da fila de reposições...');
-
-  // Buscar jobs de maior prioridade (menor score) na fila
-  // ZRANGE com pontuação (WITHSCORES) permite ver a prioridade
-  // Processar até 5 jobs por vez
-  const jobsWithScores = await redisClient.zrange(REPOSICAO_QUEUE, 0, 4, 'WITHSCORES');
-
-  // Se não houver jobs, retornar
-  if (jobsWithScores.length === 0) {
-    console.log('[Queue] Nenhum job de reposição na fila');
-    return;
-  }
-
-  // Processar os jobs obtidos (o array vem no formato [job1, score1, job2, score2, ...])
-  for (let i = 0; i < jobsWithScores.length; i += 2) {
-    const jobStr = jobsWithScores[i];
-    const job: ReposicaoJob = JSON.parse(jobStr);
-
-    console.log(`[Queue] Processando job de reposição ${job.id} (Tentativa ${job.attempts + 1}/${job.maxAttempts})`);
-
+  console.log(`[Queue] Iniciando processamento da fila de reposições...`);
+  
+  // Track how many jobs are currently being processed
+  let currentlyProcessing = 0;
+  const processingPromises: Promise<void>[] = [];
+  
+  // Process jobs until we reach concurrency limit
+  while (currentlyProcessing < QUEUE_CONCURRENCY) {
+    // Get the highest priority job that is ready to be processed
+    // ZREVRANGE gets items in reverse order (highest score first)
+    const jobData = await redis.zrevrange(REPOSICAO_QUEUE, 0, 0);
+    
+    if (jobData.length === 0) {
+      console.log(`[Queue] Não há mais jobs na fila de reposições`);
+      break;
+    }
+    
     try {
-      // Remover o job da fila para impedir processamento duplicado
-      await redisClient.zrem(REPOSICAO_QUEUE, jobStr);
-
-      // Buscar a reposição no banco de dados
-      const reposicao = await prisma.reposicao.findUnique({
-        where: { id: job.reposicaoId },
-        include: {
-          order: {
-            include: { provider: true }
-          }
-        }
-      });
-
-      if (!reposicao) {
-        console.error(`[Queue] Reposição ${job.reposicaoId} não encontrada`);
-        continue;
+      const job: ReposicaoJob = JSON.parse(jobData[0]);
+      const now = new Date();
+      const processAfter = new Date(job.processAfter);
+      
+      // Skip if job is not ready to be processed yet
+      if (processAfter > now) {
+        console.log(`[Queue] Job ${job.id} agendado para processamento futuro: ${job.processAfter}`);
+        break;
       }
-
-      // Verificar se a reposição já foi processada
-      if (reposicao.status !== 'pending') {
-        console.log(`[Queue] Reposição ${job.reposicaoId} já foi processada (status: ${reposicao.status})`);
-        continue;
-      }
-
-      // Atualizar o status da reposição para 'processing'
-      await prisma.reposicao.update({
-        where: { id: job.reposicaoId },
-        data: {
-          status: 'processing',
-          data_processamento: new Date()
-        }
-      });
-
-      // Registrar o log
-      await prisma.orderLog.create({
-        data: {
-          order_id: job.orderId,
-          level: 'info',
-          message: `Processando reposição #${job.reposicaoId}`,
-          data: {
-            job_id: job.id,
-            attempts: job.attempts + 1
-          }
-        }
-      });
-
-      // Verificar se o pedido tem ID externo (necessário para reposição)
-      if (!reposicao.order.external_service_id && !reposicao.order.external_order_id) {
-        throw new Error('Pedido sem ID externo de serviço ou ordem para reposição');
-      }
-
-      // Priorizar o external_service_id, mas usar external_order_id como fallback
-      const externalId = reposicao.order.external_service_id || reposicao.order.external_order_id;
-      console.log(`[Queue] Usando ID externo para reposição: ${externalId} (tipo: ${reposicao.order.external_service_id ? 'service_id' : 'order_id'})`);
-
-      // Lógica para processar a reposição
-      // Integrações com provedores externos, etc.
       
-      // Aqui seria implementada a lógica específica de cada provedor
-      // Exemplo: integração com um provedor de mídia social
+      // Remove the job from the queue
+      await redis.zrem(REPOSICAO_QUEUE, jobData[0]);
       
-      // Simular chamada ao provedor com o ID correto
-      console.log(`[Queue] Enviando solicitação de reposição para o provedor com ID: ${externalId}`);
-      
-      // Registrar nos logs o ID usado para reposição
-      await prisma.orderLog.create({
-        data: {
-          order_id: job.orderId,
-          level: 'info',
-          message: `Enviando reposição ao provedor com ID externo: ${externalId}`,
-          data: {
-            job_id: job.id,
-            provider: reposicao.order.provider?.name || 'desconhecido',
-            external_service_id: reposicao.order.external_service_id,
-            external_order_id: reposicao.order.external_order_id,
-            id_usado: externalId
-          }
-        }
-      });
-      
-      // Para fins de demonstração, estamos apenas simulando o processamento bem-sucedido
-      
-      // Atualizar a reposição para 'completed'
-      await prisma.reposicao.update({
-        where: { id: job.reposicaoId },
-        data: {
-          status: 'completed',
-          resposta: `Reposição processada com sucesso usando ID: ${externalId}`,
-          data_processamento: new Date()
-        }
-      });
-
-      // Registrar o log de sucesso
-      await prisma.orderLog.create({
-        data: {
-          order_id: job.orderId,
-          level: 'info',
-          message: `Reposição #${job.reposicaoId} processada com sucesso`,
-          data: {
-            job_id: job.id
-          }
-        }
-      });
-
-      console.log(`[Queue] Job de reposição ${job.id} processado com sucesso`);
-    } catch (error) {
-      console.error(`[Queue] Erro ao processar job de reposição ${job.id}:`, error);
-
-      // Incrementar o número de tentativas
+      // Increment attempts
       job.attempts += 1;
+      
+      // Process the job asynchronously
+      currentlyProcessing++;
+      
+      const processPromise = processReposicaoJob(job)
+        .catch(error => {
+          console.error(`[Queue] Erro ao processar job ${job.id}:`, error);
+          
+          // Add job back to queue with backoff if attempts left
+          return handleJobFailure(job, error);
+        })
+        .finally(() => {
+          currentlyProcessing--;
+        });
+      
+      processingPromises.push(processPromise);
+    } catch (error) {
+      console.error(`[Queue] Erro ao analisar dados do job:`, error);
+      
+      // Remove the invalid job from the queue
+      await redis.zrem(REPOSICAO_QUEUE, jobData[0]);
+    }
+  }
+  
+  // Wait for all jobs to finish processing
+  if (processingPromises.length > 0) {
+    await Promise.allSettled(processingPromises);
+  }
+  
+  console.log(`[Queue] Ciclo de processamento da fila de reposições concluído`);
+}
 
-      // Se ainda não atingiu o máximo de tentativas, recolocar na fila com atraso
-      if (job.attempts < job.maxAttempts) {
-        // Calcular o atraso baseado no número de tentativas (backoff exponencial)
-        const backoffDelay = Number(process.env.QUEUE_BACKOFF_DELAY || 5000) * Math.pow(2, job.attempts - 1);
-        const processAfter = new Date(Date.now() + backoffDelay).toISOString();
-        
-        job.processAfter = processAfter;
-        
-        // Recolocar na fila com prioridade mais baixa (score mais alto)
-        await redisClient.zadd(
-          REPOSICAO_QUEUE,
-          job.priority + job.attempts, // Aumentar score a cada tentativa
-          JSON.stringify(job)
-        );
-
-        console.log(`[Queue] Job de reposição ${job.id} recolocado na fila. Próxima tentativa após ${new Date(processAfter).toLocaleString()}`);
-      } else {
-        // Falhou todas as tentativas, marcar como falha
-        try {
-          await prisma.reposicao.update({
-            where: { id: job.reposicaoId },
-            data: {
-              status: 'failed',
-              resposta: error instanceof Error 
-                ? error.message 
-                : 'Erro desconhecido ao processar reposição',
-              data_processamento: new Date()
-            }
-          });
-
-          // Registrar o log de falha
-          await prisma.orderLog.create({
-            data: {
-              order_id: job.orderId,
-              level: 'error',
-              message: `Falha ao processar reposição #${job.reposicaoId} após ${job.maxAttempts} tentativas`,
-              data: {
-                job_id: job.id,
-                error: error instanceof Error ? error.message : 'Erro desconhecido'
-              }
-            }
-          });
-
-          console.log(`[Queue] Reposição ${job.reposicaoId} marcada como falha após ${job.maxAttempts} tentativas`);
-        } catch (dbError) {
-          console.error(`[Queue] Erro ao atualizar status da reposição ${job.reposicaoId}:`, dbError);
+/**
+ * Process a replenishment job
+ * @param job The job to process
+ */
+async function processReposicaoJob(job: ReposicaoJob): Promise<void> {
+  console.log(`[Queue] Processando job ${job.id} para reposição ${job.reposicaoId} (tentativa ${job.attempts}/${job.maxAttempts})`);
+  
+  try {
+    // Check if the replenishment still exists and is in a valid state
+    const reposicao = await prisma.reposicao.findUnique({
+      where: { id: job.reposicaoId }
+    });
+    
+    if (!reposicao) {
+      console.log(`[Queue] Reposição ${job.reposicaoId} não encontrada, job ${job.id} será descartado`);
+      return;
+    }
+    
+    if (reposicao.status !== 'pending') {
+      console.log(`[Queue] Reposição ${job.reposicaoId} não está mais pendente (status: ${reposicao.status}), job ${job.id} será descartado`);
+      return;
+    }
+    
+    // Get API key for authentication
+    const apiKey = process.env.REPOSICAO_API_KEY;
+    if (!apiKey) {
+      throw new Error('REPOSICAO_API_KEY não está configurada no ambiente');
+    }
+    
+    // Call the process endpoint to process the replenishment
+    const response = await axios.post(
+      `/api/reposicoes/processar`,
+      {
+        reposicao_id: job.reposicaoId,
+        order_id: job.orderId,
+        job_id: job.id
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
         }
       }
+    );
+    
+    if (response.data && response.data.success) {
+      console.log(`[Queue] Job ${job.id} processado com sucesso para reposição ${job.reposicaoId}`);
+    } else {
+      throw new Error(`Resposta inesperada do processador de reposições: ${JSON.stringify(response.data)}`);
+    }
+  } catch (error) {
+    console.error(`[Queue] Falha ao processar job ${job.id} para reposição ${job.reposicaoId}:`, error);
+    throw error; // Re-throw to be caught by the handler
+  }
+}
+
+/**
+ * Handle a job failure
+ * @param job The failed job
+ * @param error The error that occurred
+ */
+async function handleJobFailure(job: ReposicaoJob, error: any): Promise<void> {
+  // Log the failure
+  await prisma.orderLog.create({
+    data: {
+      order_id: job.orderId,
+      level: 'error',
+      message: `Falha ao processar job ${job.id} para reposição ${job.reposicaoId} (tentativa ${job.attempts}/${job.maxAttempts})`,
+      data: {
+        job_id: job.id,
+        reposicao_id: job.reposicaoId,
+        error: error instanceof Error ? error.message : 'Erro desconhecido',
+        attempt: job.attempts,
+        maxAttempts: job.maxAttempts
+      }
+    }
+  });
+  
+  // Check if we should retry
+  if (job.attempts < job.maxAttempts) {
+    // Calculate backoff delay with exponential increase
+    const backoffMs = QUEUE_BACKOFF_DELAY * Math.pow(2, job.attempts - 1);
+    const now = new Date();
+    const processAfter = new Date(now.getTime() + backoffMs);
+    
+    job.processAfter = processAfter.toISOString();
+    
+    // Add the job back to the queue with the same priority
+    await redis.zadd(
+      REPOSICAO_QUEUE,
+      job.priority,
+      JSON.stringify(job)
+    );
+    
+    console.log(`[Queue] Job ${job.id} reagendado para processamento em ${backoffMs}ms (${processAfter.toISOString()})`);
+  } else {
+    console.log(`[Queue] Job ${job.id} atingiu o número máximo de tentativas, marcando como falha permanente`);
+    
+    // Mark the replenishment as failed in the database
+    try {
+      await prisma.reposicao.update({
+        where: { id: job.reposicaoId },
+        data: {
+          status: 'failed',
+          resposta: `Falha após ${job.maxAttempts} tentativas: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+          processado_por: 'queue',
+          data_processamento: new Date(),
+          metadata: {
+            job_id: job.id,
+            error: error instanceof Error ? error.message : 'Erro desconhecido',
+            attempts: job.attempts,
+            maxAttempts: job.maxAttempts,
+            error_timestamp: new Date().toISOString()
+          }
+        }
+      });
+      
+      // Log the permanent failure
+      await prisma.orderLog.create({
+        data: {
+          order_id: job.orderId,
+          level: 'error',
+          message: `Reposição ${job.reposicaoId} falhou permanentemente após ${job.attempts} tentativas`,
+          data: {
+            job_id: job.id,
+            reposicao_id: job.reposicaoId,
+            attempts: job.attempts,
+            maxAttempts: job.maxAttempts,
+            last_error: error instanceof Error ? error.message : 'Erro desconhecido'
+          }
+        }
+      });
+    } catch (dbError) {
+      console.error(`[Queue] Erro ao atualizar status da reposição ${job.reposicaoId} no banco de dados:`, dbError);
     }
   }
 }
 
 /**
- * Inicia o processador de fila como um serviço em background
- * @returns Uma função para parar o processador
+ * Inicia o processador da fila como um serviço em background
  */
-export function startQueueProcessor() {
-  console.log('[Queue] Iniciando processador de fila de reposições');
+export function startQueueProcessor(options: {
+  intervalMs?: number;
+  processImmediately?: boolean;
+} = {}) {
+  const intervalMs = options.intervalMs || QUEUE_PROCESSING_INTERVAL;
+  const processImmediately = options.processImmediately !== false;
   
-  const interval = Number(process.env.QUEUE_PROCESSING_INTERVAL || 60000); // Default: 1 minuto
-  const processIntervalId = setInterval(processReposicaoQueue, interval);
+  console.log(`[Queue] Iniciando processador de fila de reposições com intervalo de ${intervalMs}ms`);
   
-  // Executar uma vez imediatamente
-  processReposicaoQueue().catch(err => {
-    console.error('[Queue] Erro no processamento inicial da fila:', err);
-  });
+  // Process immediately if requested
+  if (processImmediately) {
+    processReposicaoQueue().catch(error => {
+      console.error(`[Queue] Erro no primeiro processamento da fila:`, error);
+    });
+  }
   
+  // Set up interval for periodic processing
+  const intervalId = setInterval(() => {
+    processReposicaoQueue().catch(error => {
+      console.error(`[Queue] Erro no processamento periódico da fila:`, error);
+    });
+  }, intervalMs);
+  
+  // Return function to stop the processor
   return () => {
-    console.log('[Queue] Parando processador de fila de reposições');
-    clearInterval(processIntervalId);
+    console.log(`[Queue] Parando processador de fila de reposições`);
+    clearInterval(intervalId);
   };
 } 
