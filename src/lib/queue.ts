@@ -22,27 +22,71 @@ interface ReposicaoJob {
   processAfter?: string;
 }
 
+// Interface para parâmetros da função enqueueReposicao
+interface EnqueueReposicaoParams {
+  reposicaoId: string;
+  orderId: string;
+  userId?: string;
+  priority?: number | 'high' | 'medium' | 'low';
+}
+
 /**
  * Adiciona um job de processamento de reposição à fila
- * @param reposicaoId ID da reposição a ser processada
- * @param orderId ID do pedido associado à reposição
- * @param userId ID do usuário que solicitou a reposição (opcional)
- * @param priority Prioridade do job (menor = maior prioridade)
+ * @param params Objeto com os parâmetros da reposição ou ID da reposição
+ * @param orderId ID do pedido associado à reposição (quando params for string)
+ * @param userId ID do usuário que solicitou a reposição (opcional, quando params for string)
+ * @param priority Prioridade do job (menor = maior prioridade, quando params for string)
  * @returns O job criado
  */
 export async function enqueueReposicao(
-  reposicaoId: string,
-  orderId: string,
+  params: string | EnqueueReposicaoParams,
+  orderId?: string,
   userId?: string,
   priority: number = 10
 ): Promise<ReposicaoJob> {
+  // Determinar os valores com base no tipo do primeiro parâmetro
+  let reposicaoId: string;
+  let jobPriority: number;
+  let jobUserId: string | undefined;
+  let jobOrderId: string;
+  
+  // Verificar se estamos usando a versão com objeto ou a versão com argumentos individuais
+  if (typeof params === 'string') {
+    // Versão original com argumentos separados
+    reposicaoId = params;
+    jobOrderId = orderId as string;
+    jobUserId = userId;
+    jobPriority = priority;
+  } else {
+    // Versão nova com objeto
+    reposicaoId = params.reposicaoId;
+    jobOrderId = params.orderId;
+    jobUserId = params.userId;
+    
+    // Converter prioridade textual para numérica se necessário
+    if (params.priority === 'high') {
+      jobPriority = 5;
+    } else if (params.priority === 'medium') {
+      jobPriority = 10;
+    } else if (params.priority === 'low') {
+      jobPriority = 15;
+    } else {
+      jobPriority = params.priority || 10;
+    }
+  }
+  
+  // Validação básica
+  if (!reposicaoId || !jobOrderId) {
+    throw new Error('IDs de reposição e pedido são obrigatórios');
+  }
+
   // Criar o job de reposição
   const job: ReposicaoJob = {
     id: uuidv4(),
     reposicaoId,
-    orderId,
-    userId,
-    priority,
+    orderId: jobOrderId,
+    userId: jobUserId,
+    priority: jobPriority,
     attempts: 0,
     maxAttempts: Number(process.env.QUEUE_MAX_RETRY_ATTEMPTS || 3),
     createdAt: new Date().toISOString(),
@@ -51,7 +95,7 @@ export async function enqueueReposicao(
   // Adicionar o job à fila de prioridade no Redis
   await redisClient.zadd(
     REPOSICAO_QUEUE,
-    priority, // Score (prioridade)
+    jobPriority, // Score (prioridade)
     JSON.stringify(job) // Valor (job serializado)
   );
 
