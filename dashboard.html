@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard de Vendas - Viralizamos</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .card {
+      transition: transform 0.3s;
+    }
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    .loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100px;
+    }
+    .loading-spinner {
+      width: 3rem;
+      height: 3rem;
+    }
+    .error-message {
+      color: #dc3545;
+      text-align: center;
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1>Dashboard de Vendas - Viralizamos</h1>
+      <div>
+        <select id="periodoSelect" class="form-select">
+          <option value="7">Últimos 7 dias</option>
+          <option value="30" selected>Últimos 30 dias</option>
+          <option value="90">Últimos 90 dias</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Cards de resumo -->
+    <div class="row mb-4">
+      <div class="col-md-3">
+        <div class="card bg-primary text-white">
+          <div class="card-body">
+            <h5 class="card-title">Total de Vendas</h5>
+            <h2 class="card-text" id="totalVendas">-</h2>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card bg-success text-white">
+          <div class="card-body">
+            <h5 class="card-title">Valor Total</h5>
+            <h2 class="card-text" id="valorTotal">-</h2>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card bg-info text-white">
+          <div class="card-body">
+            <h5 class="card-title">Pedidos Pendentes</h5>
+            <h2 class="card-text" id="pedidosPendentes">-</h2>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card bg-warning text-white">
+          <div class="card-body">
+            <h5 class="card-title">Taxa de Conclusão</h5>
+            <h2 class="card-text" id="taxaConclusao">-</h2>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gráficos -->
+    <div class="row mb-4">
+      <div class="col-md-8">
+        <div class="card">
+          <div class="card-header">
+            Vendas por Dia
+          </div>
+          <div class="card-body">
+            <canvas id="vendasPorDiaChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card">
+          <div class="card-header">
+            Status dos Pedidos
+          </div>
+          <div class="card-body">
+            <canvas id="statusPedidosChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabela de Pedidos Recentes -->
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Pedidos Recentes</span>
+        <button id="refreshBtn" class="btn btn-sm btn-outline-primary">Atualizar</button>
+      </div>
+      <div class="card-body">
+        <div id="tabelaLoading" class="loading">
+          <div class="spinner-border loading-spinner" role="status">
+            <span class="visually-hidden">Carregando...</span>
+          </div>
+        </div>
+        <div id="tabelaError" class="error-message d-none">
+          Erro ao carregar pedidos. Tente novamente.
+        </div>
+        <div class="table-responsive">
+          <table class="table table-striped" id="pedidosTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th>Serviço</th>
+                <th>Valor</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Será preenchido via JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Configurações iniciais
+    const TOKEN_KEY = 'admin_token'; // Nome do cookie usado pelo sistema
+    const ORDERS_API_URL = 'https://orders.viralizamos.com';
+    const PAYMENTS_API_URL = 'https://pagamentos.viralizamos.com';
+    
+    let vendasPorDiaChart, statusPedidosChart;
+    
+    // Função para formatar valores monetários
+    function formatarMoeda(valor) {
+      return new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL'
+      }).format(valor);
+    }
+    
+    // Função para formatar datas
+    function formatarData(data) {
+      return new Date(data).toLocaleDateString('pt-BR');
+    }
+    
+    // Função para mapear status para cores
+    function getStatusColor(status) {
+      const statusMap = {
+        'completed': 'success',
+        'processing': 'info',
+        'pending': 'warning',
+        'failed': 'danger',
+        'canceled': 'secondary',
+        'error': 'danger'
+      };
+      return statusMap[status] || 'secondary';
+    }
+    
+    // Função para mapear status para texto em português
+    function getStatusText(status) {
+      const statusMap = {
+        'completed': 'Concluído',
+        'processing': 'Processando',
+        'pending': 'Pendente',
+        'failed': 'Falha',
+        'canceled': 'Cancelado',
+        'error': 'Erro'
+      };
+      return statusMap[status] || status;
+    }
+    
+    // Função para buscar dados de estatísticas
+    async function buscarEstatisticas(dias) {
+      try {
+        const response = await fetch(`${ORDERS_API_URL}/api/admin/dashboard/stats`, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Falha ao buscar estatísticas');
+        }
+        
+        const data = await response.json();
+        
+        // Atualizar cards
+        document.getElementById('totalVendas').textContent = data.totalOrders || 0;
+        document.getElementById('valorTotal').textContent = formatarMoeda(data.totalRevenue || 0);
+        document.getElementById('pedidosPendentes').textContent = data.pendingOrders || 0;
+        
+        const taxaConclusao = data.totalOrders > 0 
+          ? Math.round((data.completedOrders / data.totalOrders) * 100) 
+          : 0;
+        
+        document.getElementById('taxaConclusao').textContent = `${taxaConclusao}%`;
+        
+        // Atualizar gráfico de status
+        atualizarGraficoStatus({
+          completed: data.completedOrders || 0,
+          pending: data.pendingOrders || 0,
+          failed: data.failedOrders || 0
+        });
+        
+        // Se não houver dados diários no endpoint principal, buscar do endpoint específico
+        buscarVendasDiarias(dias);
+        
+      } catch (error) {
+        console.error('Erro ao buscar estatísticas:', error);
+        
+        // Tentar endpoint alternativo do microserviço de pagamentos
+        try {
+          const responsePagamentos = await fetch(`${PAYMENTS_API_URL}/api/admin/dashboard/stats`, {
+            credentials: 'include'
+          });
+          
+          if (responsePagamentos.ok) {
+            const dataPagamentos = await responsePagamentos.json();
+            
+            // Atualizar cards com dados do serviço de pagamentos
+            document.getElementById('totalVendas').textContent = dataPagamentos.totalOrders || 0;
+            document.getElementById('valorTotal').textContent = formatarMoeda(dataPagamentos.totalAmount || 0);
+            document.getElementById('pedidosPendentes').textContent = dataPagamentos.pendingOrders || 0;
+            
+            const taxaConclusao = dataPagamentos.totalOrders > 0 
+              ? Math.round((dataPagamentos.completedOrders / dataPagamentos.totalOrders) * 100) 
+              : 0;
+            
+            document.getElementById('taxaConclusao').textContent = `${taxaConclusao}%`;
+            
+            // Atualizar gráfico de status
+            atualizarGraficoStatus({
+              completed: dataPagamentos.completedOrders || 0,
+              pending: dataPagamentos.pendingOrders || 0,
+              failed: dataPagamentos.failedOrders || 0
+            });
+          }
+        } catch (pagamentosError) {
+          console.error('Erro ao buscar estatísticas do serviço de pagamentos:', pagamentosError);
+        }
+      }
+    }
+    
+    // Função para buscar vendas diárias
+    async function buscarVendasDiarias(dias) {
+      try {
+        const response = await fetch(`${ORDERS_API_URL}/api/admin/dashboard/chart/orders?days=${dias}`, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Falha ao buscar vendas diárias');
+        }
+        
+        const data = await response.json();
+        
+        // Formatar dados para o gráfico
+        const labels = data.map(item => item.date);
+        const values = data.map(item => item.count);
+        
+        // Atualizar gráfico
+        atualizarGraficoVendasDiarias(labels, values);
+        
+      } catch (error) {
+        console.error('Erro ao buscar vendas diárias:', error);
+        
+        // Tentar endpoint alternativo
+        try {
+          const responseAlt = await fetch(`${PAYMENTS_API_URL}/api/stats/orders/daily?days=${dias}`, {
+            credentials: 'include'
+          });
+          
+          if (responseAlt.ok) {
+            const dataAlt = await responseAlt.json();
+            
+            // Formatar dados para o gráfico
+            const labels = dataAlt.map(item => item.date);
+            const values = dataAlt.map(item => item.count);
+            
+            // Atualizar gráfico
+            atualizarGraficoVendasDiarias(labels, values);
+          }
+        } catch (altError) {
+          console.error('Erro ao buscar vendas diárias do serviço alternativo:', altError);
+        }
+      }
+    }
+    
+    // Função para buscar pedidos recentes
+    async function buscarPedidosRecentes() {
+      // Mostrar loading
+      document.getElementById('tabelaLoading').classList.remove('d-none');
+      document.getElementById('tabelaError').classList.add('d-none');
+      
+      try {
+        const response = await fetch(`${ORDERS_API_URL}/api/admin/orders?limit=10`, {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Falha ao buscar pedidos recentes');
+        }
+        
+        const data = await response.json();
+        
+        // Esconder loading
+        document.getElementById('tabelaLoading').classList.add('d-none');
+        
+        // Preencher tabela
+        const tbody = document.querySelector('#pedidosTable tbody');
+        tbody.innerHTML = '';
+        
+        data.orders.forEach(pedido => {
+          const tr = document.createElement('tr');
+          
+          tr.innerHTML = `
+            <td>${pedido.id.substring(0, 8)}...</td>
+            <td>${formatarData(pedido.created_at)}</td>
+            <td>${pedido.user?.name || pedido.user?.email || 'N/A'}</td>
+            <td>${pedido.service_name || 'N/A'}</td>
+            <td>${formatarMoeda(pedido.amount || 0)}</td>
+            <td><span class="badge bg-${getStatusColor(pedido.status)}">${getStatusText(pedido.status)}</span></td>
+          `;
+          
+          tbody.appendChild(tr);
+        });
+        
+        if (data.orders.length === 0) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td colspan="6" class="text-center">Nenhum pedido encontrado</td>';
+          tbody.appendChild(tr);
+        }
+        
+      } catch (error) {
+        console.error('Erro ao buscar pedidos recentes:', error);
+        
+        // Esconder loading e mostrar erro
+        document.getElementById('tabelaLoading').classList.add('d-none');
+        
+        // Tentar buscar do serviço de pagamentos
+        try {
+          const responsePagamentos = await fetch(`${PAYMENTS_API_URL}/api/admin/orders?limit=10`, {
+            credentials: 'include'
+          });
+          
+          if (responsePagamentos.ok) {
+            const dataPagamentos = await responsePagamentos.json();
+            
+            // Preencher tabela com dados do serviço de pagamentos
+            const tbody = document.querySelector('#pedidosTable tbody');
+            tbody.innerHTML = '';
+            
+            dataPagamentos.orders.forEach(pedido => {
+              const tr = document.createElement('tr');
+              
+              tr.innerHTML = `
+                <td>${pedido.id.substring(0, 8)}...</td>
+                <td>${formatarData(pedido.created_at)}</td>
+                <td>${pedido.customer_email || 'N/A'}</td>
+                <td>${pedido.service_name || 'N/A'}</td>
+                <td>${formatarMoeda(pedido.amount || 0)}</td>
+                <td><span class="badge bg-${getStatusColor(pedido.status)}">${getStatusText(pedido.status)}</span></td>
+              `;
+              
+              tbody.appendChild(tr);
+            });
+            
+            if (dataPagamentos.orders.length === 0) {
+              const tr = document.createElement('tr');
+              tr.innerHTML = '<td colspan="6" class="text-center">Nenhum pedido encontrado</td>';
+              tbody.appendChild(tr);
+            }
+          } else {
+            throw new Error('Falha ao buscar pedidos do serviço de pagamentos');
+          }
+        } catch (pagamentosError) {
+          console.error('Erro ao buscar pedidos do serviço de pagamentos:', pagamentosError);
+          document.getElementById('tabelaError').classList.remove('d-none');
+        }
+      }
+    }
+    
+    // Função para inicializar os gráficos
+    function inicializarGraficos() {
+      // Gráfico de vendas por dia
+      const ctxVendas = document.getElementById('vendasPorDiaChart').getContext('2d');
+      vendasPorDiaChart = new Chart(ctxVendas, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Vendas',
+            data: [],
+            borderColor: 'rgba(75, 192, 192, 1)',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+            tension: 0.1,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            title: {
+              display: true,
+              text: 'Volume de Vendas Diárias'
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+      
+      // Gráfico de status dos pedidos
+      const ctxStatus = document.getElementById('statusPedidosChart').getContext('2d');
+      statusPedidosChart = new Chart(ctxStatus, {
+        type: 'doughnut',
+        data: {
+          labels: ['Concluídos', 'Pendentes', 'Falhas'],
+          datasets: [{
+            data: [0, 0, 0],
+            backgroundColor: [
+              'rgba(40, 167, 69, 0.7)',
+              'rgba(255, 193, 7, 0.7)',
+              'rgba(220, 53, 69, 0.7)'
+            ],
+            borderColor: [
+              'rgba(40, 167, 69, 1)',
+              'rgba(255, 193, 7, 1)',
+              'rgba(220, 53, 69, 1)'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              position: 'bottom',
+            },
+            title: {
+              display: true,
+              text: 'Status dos Pedidos'
+            }
+          }
+        }
+      });
+    }
+    
+    // Função para atualizar o gráfico de vendas diárias
+    function atualizarGraficoVendasDiarias(labels, values) {
+      vendasPorDiaChart.data.labels = labels;
+      vendasPorDiaChart.data.datasets[0].data = values;
+      vendasPorDiaChart.update();
+    }
+    
+    // Função para atualizar o gráfico de status dos pedidos
+    function atualizarGraficoStatus(data) {
+      statusPedidosChart.data.datasets[0].data = [
+        data.completed || 0,
+        data.pending || 0,
+        data.failed || 0
+      ];
+      statusPedidosChart.update();
+    }
+    
+    // Inicializar a página
+    document.addEventListener('DOMContentLoaded', function() {
+      // Inicializar gráficos
+      inicializarGraficos();
+      
+      // Buscar dados iniciais
+      const diasSelecionados = document.getElementById('periodoSelect').value;
+      buscarEstatisticas(diasSelecionados);
+      buscarPedidosRecentes();
+      
+      // Configurar event listeners
+      document.getElementById('periodoSelect').addEventListener('change', function() {
+        const dias = this.value;
+        buscarEstatisticas(dias);
+      });
+      
+      document.getElementById('refreshBtn').addEventListener('click', function() {
+        const dias = document.getElementById('periodoSelect').value;
+        buscarEstatisticas(dias);
+        buscarPedidosRecentes();
+      });
+      
+      // Atualizar dados a cada 5 minutos
+      setInterval(() => {
+        const dias = document.getElementById('periodoSelect').value;
+        buscarEstatisticas(dias);
+        buscarPedidosRecentes();
+      }, 5 * 60 * 1000);
+    });
+  </script>
+
+  <!-- Bootstrap Bundle with Popper -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 
