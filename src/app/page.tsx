@@ -53,9 +53,13 @@ export default function HomePage() {
           
           <p className="text-sm text-gray-500">{time}</p>
           
-          <div className="mt-6">
+          <div className="flex flex-col space-y-3 mt-6">
             <Link href="/dashboard" className="inline-block bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded transition-colors">
               Acessar Dashboard de Vendas
+            </Link>
+            
+            <Link href="/painel/login" className="inline-block bg-emerald-500 hover:bg-emerald-600 text-white font-medium py-2 px-4 rounded transition-colors">
+              Painel Administrativo
             </Link>
           </div>
         </div>
