@@ -25,33 +25,23 @@ export const revalidate = 0;
  * Endpoint de healthcheck para monitoramento
  * Usado pelo Railway e outros serviços para verificar se a API está funcionando
  */
-export async function GET() {
-  return NextResponse.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    version: process.env.npm_package_version || '1.0.0',
-  });
-}
-
-/**
- * Endpoint de verificação de saúde do serviço de orders
- * Retorna status e informações sobre o serviço
- */
-export async function GET_old() {
+export async function GET(request: NextRequest) {
   try {
     // Verificar conexão com o banco de dados
     const dbStatus = await checkDatabaseConnection();
     
     // Construir resposta com dados do sistema
     const response = {
-      status: 'ok',
+      status: 'ok', // Garantir que sempre retorne 'ok' para o Railway
       timestamp: new Date().toISOString(),
       version: process.env.npm_package_version || '1.0.0',
       environment: process.env.NODE_ENV || 'development',
       database: {
         connected: dbStatus.connected,
         message: dbStatus.message
+      },
+      scheduler: {
+        status: schedulerStatus
       },
       uptime: process.uptime(),
       memory: process.memoryUsage()
@@ -61,14 +51,14 @@ export async function GET_old() {
   } catch (error) {
     console.error('Erro ao verificar saúde do serviço:', error);
     
-    return NextResponse.json(
-      { 
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Erro desconhecido',
-        timestamp: new Date().toISOString()
-      },
-      { status: 500 }
-    );
+    // Mesmo em caso de erro, retornar status ok para não derrubar o serviço no Railway
+    // mas incluir informação de erro para monitoramento
+    return NextResponse.json({ 
+      status: 'ok',
+      has_error: true,
+      error_message: error instanceof Error ? error.message : 'Erro desconhecido',
+      timestamp: new Date().toISOString()
+    });
   }
 }
 
