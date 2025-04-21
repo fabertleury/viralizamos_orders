@@ -25,15 +25,13 @@ export const revalidate = 0;
  * Endpoint de healthcheck para monitoramento
  * Usado pelo Railway e outros serviços para verificar se a API está funcionando
  */
-export async function GET(request: NextRequest) {
-  console.log('Health check requisitado:', request.url);
-  
+export async function GET() {
   return NextResponse.json({
     status: 'ok',
-    service: 'viralizamos-orders-api',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  }, { status: 200 });
+    environment: process.env.NODE_ENV || 'development',
+    version: process.env.npm_package_version || '1.0.0',
+  });
 }
 
 /**

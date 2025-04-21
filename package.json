@@ -46,7 +46,9 @@
     "react-dom": "^18",
     "regenerator-runtime": "^0.14.1",
     "uuid": "^11.1.0",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "chart.js": "^4.4.1",
+    "react-chartjs-2": "^5.2.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.6",

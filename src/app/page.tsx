@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 export default function HomePage() {
   const [status, setStatus] = useState<'loading' | 'online'>('loading');
@@ -51,6 +52,12 @@ export default function HomePage() {
           </div>
           
           <p className="text-sm text-gray-500">{time}</p>
+          
+          <div className="mt-6">
+            <Link href="/dashboard" className="inline-block bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded transition-colors">
+              Acessar Dashboard de Vendas
+            </Link>
+          </div>
         </div>
         
         <div className="mt-6 border-t border-gray-200 pt-4">
