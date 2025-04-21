@@ -1,6 +1,42 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  swcMinify: true,
+  // Garantir que rotas de API e páginas do painel funcionem corretamente
+  async rewrites() {
+    return [
+      {
+        source: '/painel',
+        destination: '/painel',
+      },
+      {
+        source: '/painel/:path*',
+        destination: '/painel/:path*',
+      },
+      {
+        source: '/api/:path*',
+        destination: '/api/:path*',
+      },
+      {
+        source: '/health',
+        destination: '/health',
+      }
+    ]
+  },
+  // Configurar headers para evitar problemas de CORS e cache
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=0, must-revalidate',
+          }
+        ],
+      },
+    ]
+  },
   // Configurações para evitar problemas com o Jest
   experimental: {
     esmExternals: 'loose',

@@ -13,22 +13,49 @@ export default function PainelLayout({
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [adminEmail, setAdminEmail] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   // Verificar se está na página de login
   const isLoginPage = pathname === '/painel/login';
 
   useEffect(() => {
-    // Obter dados do admin do localStorage (que será setado pelo componente após autenticação)
-    const adminData = localStorage.getItem('admin_data');
-    if (adminData) {
-      try {
-        const data = JSON.parse(adminData);
-        setAdminEmail(data.email);
-      } catch (e) {
-        console.error('Erro ao parsear dados do admin:', e);
+    // Verificar autenticação
+    const checkAuth = async () => {
+      // Obter dados do admin do localStorage (que será setado pelo componente após autenticação)
+      const adminData = localStorage.getItem('admin_data');
+      const adminToken = document.cookie.includes('admin_token=');
+      
+      console.log('Verificando autenticação no painel:', { 
+        adminData: !!adminData, 
+        adminToken, 
+        isLoginPage 
+      });
+      
+      if (adminData) {
+        try {
+          const data = JSON.parse(adminData);
+          setAdminEmail(data.email);
+          setIsAuthenticated(true);
+        } catch (e) {
+          console.error('Erro ao parsear dados do admin:', e);
+          setIsAuthenticated(false);
+        }
+      } else if (!isLoginPage && !adminToken) {
+        console.log('Usuário não autenticado, redirecionando para login');
+        setIsAuthenticated(false);
+        router.push('/painel/login');
+      } else if (isLoginPage && adminToken) {
+        // Se já estiver autenticado e tentar acessar a página de login, redirecionar para o dashboard
+        console.log('Usuário já autenticado, redirecionando para dashboard');
+        setIsAuthenticated(true);
+        router.push('/painel/dashboard');
+      } else {
+        setIsAuthenticated(isLoginPage ? null : false);
       }
-    }
-  }, []);
+    };
+
+    checkAuth();
+  }, [isLoginPage, router]);
 
   const handleLogout = async () => {
     try {
@@ -36,6 +63,7 @@ export default function PainelLayout({
         method: 'POST',
       });
       localStorage.removeItem('admin_data');
+      setIsAuthenticated(false);
       router.push('/painel/login');
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
@@ -45,6 +73,24 @@ export default function PainelLayout({
   // Renderizar apenas o conteúdo para a página de login
   if (isLoginPage) {
     return <>{children}</>;
+  }
+
+  // Renderizar uma tela de carregamento enquanto verifica a autenticação
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Se não estiver autenticado e não for a página de login, não renderizar nada
+  // O redirecionamento já foi feito no useEffect
+  if (!isAuthenticated && !isLoginPage) {
+    return null;
   }
 
   return (

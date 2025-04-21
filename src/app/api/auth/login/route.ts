@@ -12,11 +12,14 @@ interface LoginRequest {
 }
 
 export async function POST(request: Request) {
+  console.log('Requisição de login recebida');
   try {
     const body: LoginRequest = await request.json();
     const { email, password } = body;
+    console.log(`Tentativa de login para o email: ${email}`);
 
     if (!email || !password) {
+      console.log('Email ou senha não fornecidos');
       return NextResponse.json(
         { message: 'Email e senha são obrigatórios' },
         { status: 400 }
@@ -26,6 +29,7 @@ export async function POST(request: Request) {
     // Verificar se é um usuário admin
     // Em produção, deve-se usar hash+salt para senhas
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+      console.log('Login com credenciais do ambiente');
       // Gerar token JWT
       const token = jwt.sign(
         {
@@ -51,6 +55,7 @@ export async function POST(request: Request) {
 
     // Admin pré-definido para fins de desenvolvimento
     if (process.env.NODE_ENV === 'development' && email === 'admin@viralizamos.com' && password === 'admin123') {
+      console.log('Login com credenciais de desenvolvimento');
       const token = jwt.sign(
         {
           email,
@@ -69,9 +74,11 @@ export async function POST(request: Request) {
         sameSite: 'strict',
       });
 
+      console.log('Cookie definido e retornando resposta de sucesso');
       return NextResponse.json({ message: 'Login bem-sucedido' });
     }
 
+    console.log('Credenciais inválidas fornecidas');
     return NextResponse.json(
       { message: 'Credenciais inválidas' },
       { status: 401 }
