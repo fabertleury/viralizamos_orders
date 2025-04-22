@@ -36,18 +36,18 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10');
     const status = searchParams.get('status') || '';
     const search = searchParams.get('search') || '';
-    
+
     // Calcular offset para paginação
     const skip = (page - 1) * limit;
 
     // Preparar filtros
     let whereClause: any = {};
-
+    
     // Filtrar por status, se especificado
     if (status) {
       whereClause.status = status;
     }
-
+    
     // Filtrar por termo de busca
     if (search) {
       whereClause.OR = [
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       orders,
-      page,
+        page,
       totalPages,
       totalItems: totalOrders,
       statusCounts: {
