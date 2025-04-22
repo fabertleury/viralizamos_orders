@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const API_KEY = process.env.API_KEY || 'vrlzms_api_3ac5b8def47921e6a8b459f45d3c7a2fedcb1284';
 
-// Validar API Key
+/// Validar API Key
 const validateApiKey = (apiKey: string) => {
   return apiKey === API_KEY;
 };
