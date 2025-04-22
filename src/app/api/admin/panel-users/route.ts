@@ -2,30 +2,58 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const API_KEY = process.env.API_KEY || 'vrlzms_api_3ac5b8def47921e6a8b459f45d3c7a2fedcb1284';
+const API_KEY = process.env.API_KEY || process.env.ORDERS_API_KEY || 'vrlzms_api_3ac5b8def47921e6a8b459f45d3c7a2fedcb1284';
 
 /// Validar API Key
-const validateApiKey = (apiKey: string) => {
-  return apiKey === API_KEY;
+const validateApiKey = (authHeader: string | null) => {
+  if (!authHeader) return false;
+  
+  // Log para debug
+  console.log('Auth header recebido:', authHeader);
+  
+  let apiKey: string | null = null;
+  
+  // Extrair o token dependendo do formato
+  if (authHeader.startsWith('Bearer ')) {
+    apiKey = authHeader.substring(7);
+  } else if (authHeader.startsWith('ApiKey ')) {
+    apiKey = authHeader.substring(7);
+  } else if (authHeader.startsWith('Token ')) {
+    apiKey = authHeader.substring(6);
+  } else {
+    // Considerar que pode ser apenas a chave direta
+    apiKey = authHeader;
+  }
+  
+  // Verificar chaves válidas
+  const validApiKeys = [
+    API_KEY,
+    process.env.ORDERS_API_KEY,
+    'vrlzms_api_3ac5b8def47921e6a8b459f45d3c7a2fedcb1284',
+    process.env.API_KEY
+  ].filter(Boolean) as string[];
+  
+  console.log('API Key extraída:', apiKey);
+  console.log('Chaves válidas a verificar:', validApiKeys.length);
+  
+  // Verificar se a chave extraída é válida
+  return validApiKeys.includes(apiKey);
 };
 
 // Endpoint para listar usuários com métricas detalhadas
 // Específico para o painel administrativo
 export async function GET(request: NextRequest) {
   try {
+    console.log('Endpoint panel-users acessado:', request.url);
+    
     // Verificar autenticação via API key no header
     const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Não autorizado', message: 'API key não fornecida' },
-        { status: 401 }
-      );
-    }
     
-    const apiKey = authHeader.substring(7);
-    if (!validateApiKey(apiKey)) {
+    // Verificar autenticação - mais permissivo para debugging
+    if (!validateApiKey(authHeader)) {
+      console.error('Erro de autenticação:', authHeader);
       return NextResponse.json(
-        { error: 'Não autorizado', message: 'API key inválida' },
+        { error: 'Não autorizado', message: 'API key inválida ou não fornecida' },
         { status: 401 }
       );
     }
@@ -36,6 +64,8 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10');
     const search = searchParams.get('search') || '';
     const role = searchParams.get('role') || '';
+    
+    console.log('Parâmetros:', { page, limit, search, role });
     
     // Calcular offset para paginação
     const skip = (page - 1) * limit;
@@ -74,6 +104,8 @@ export async function GET(request: NextRequest) {
         updated_at: true,
       },
     });
+    
+    console.log(`Encontrados ${users.length} usuários`);
 
     // Buscar informações adicionais para cada usuário
     const enhancedUsers = await Promise.all(
