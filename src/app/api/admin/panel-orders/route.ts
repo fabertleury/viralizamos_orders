@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
           }
         },
         service_id: true,
-        service_type: true,
+        external_service_id: true,
         target_username: true,
         external_order_id: true,
         user_id: true,
