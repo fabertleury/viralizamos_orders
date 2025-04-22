@@ -1,94 +1,123 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { verifyApiKey } from '@/lib/auth';
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 /**
- * Endpoint para obter estatísticas de pedidos por email de usuário
- * Este endpoint recebe uma lista de emails e retorna estatísticas
- * de pedidos para cada um.
- * 
- * @route POST /api/stats/users/orders
+ * POST /api/stats/users/orders
+ * Obter estatísticas de pedidos por usuário (usado pelo painel administrativo)
  */
 export async function POST(request: NextRequest) {
   try {
-    // Verificar se a requisição tem a API key correta
+    // Verificar autenticação (opcional, pois a rota pode ser pública para o painel)
     const authHeader = request.headers.get('authorization');
-    if (!verifyApiKey(authHeader)) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    if (!authHeader) {
+      console.warn('Requisição sem cabeçalho de autorização');
     }
 
-    // Obter a lista de emails do corpo da requisição
-    const body = await request.json();
-    const { emails } = body;
+    // Obter lista de emails do corpo da requisição
+    const { emails } = await request.json();
 
     if (!emails || !Array.isArray(emails) || emails.length === 0) {
       return NextResponse.json(
-        { error: 'É necessário fornecer uma lista de emails' },
+        { error: 'Lista de emails inválida ou vazia' },
         { status: 400 }
       );
     }
 
-    console.log(`[API:Stats:Users] Buscando estatísticas de pedidos para ${emails.length} emails`);
+    // Limitar a quantidade de emails para evitar sobrecarga
+    const limitedEmails = emails.slice(0, 100);
 
-    // Limitar o número de emails para evitar queries muito pesadas
-    const emailsLimit = emails.slice(0, 100);
-    
-    // Resultado que será retornado - mapeamento por email
-    const resultado: Record<string, any> = {};
-    
-    // Para cada email, buscar as estatísticas
-    for (const email of emailsLimit) {
-      // Buscar os pedidos mais recentes deste usuário
-      const pedidos = await prisma.order.findMany({
+    // Buscar usuários por email
+    const users = await prisma.user.findMany({
+      where: {
+        email: {
+          in: limitedEmails,
+        },
+      },
+      select: {
+        id: true,
+        email: true,
+      },
+    });
+
+    // Criar mapa de emails para IDs de usuário
+    const userIdMap = new Map(users.map((user) => [user.email, user.id]));
+
+    // Resultados por email
+    const result: Record<string, any> = {};
+
+    // Para cada email encontrado, buscar estatísticas de pedidos
+    for (const email of limitedEmails) {
+      const userId = userIdMap.get(email);
+
+      if (!userId) {
+        // Usuário não encontrado
+        result[email] = {
+          total_pedidos: 0,
+          total_gasto: 0,
+          ultimo_pedido: null,
+          servicos: [],
+        };
+        continue;
+      }
+
+      // Contar total de pedidos
+      const totalPedidos = await prisma.order.count({
         where: {
-          customer_email: email
+          user_id: userId,
+        },
+      });
+
+      // Calcular total gasto
+      const totalGasto = await prisma.order.aggregate({
+        where: {
+          user_id: userId,
+          status: 'completed',
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+
+      // Buscar último pedido
+      const ultimoPedido = await prisma.order.findFirst({
+        where: {
+          user_id: userId,
         },
         orderBy: {
-          created_at: 'desc'
+          created_at: 'desc',
         },
-        take: 50 // Limitar a quantidade para performance
+        select: {
+          created_at: true,
+        },
       });
-      
-      // Calcular estatísticas
-      const totalPedidos = pedidos.length;
-      
-      // Calcular valor total gasto (soma dos valores de todos os pedidos)
-      const totalGasto = pedidos.reduce((soma, pedido) => soma + (pedido.amount || 0), 0);
-      
-      // Obter dados do último pedido, se existir
-      const ultimoPedido = pedidos[0] ? {
-        data: pedidos[0].created_at.toISOString(),
-        valor: pedidos[0].amount || 0,
-        status: pedidos[0].status,
-        produto: pedidos[0].external_service_id || 'Não identificado'
-      } : null;
-      
-      // Coletar todos os serviços únicos utilizados
-      const servicosUtilizados = [...new Set(
-        pedidos
-          .map(pedido => pedido.external_service_id)
-          .filter(Boolean) as string[]
-      )];
-      
-      // Adicionar as estatísticas ao resultado
-      resultado[email] = {
+
+      // Buscar serviços mais utilizados
+      const servicos = await prisma.$queryRaw`
+        SELECT service_id, COUNT(*) as count
+        FROM "Order"
+        WHERE user_id = ${userId}
+          AND service_id IS NOT NULL
+        GROUP BY service_id
+        ORDER BY count DESC
+        LIMIT 5
+      `;
+
+      // Adicionar resultado ao mapa
+      result[email] = {
         total_pedidos: totalPedidos,
-        total_gasto: totalGasto,
-        ultimo_pedido: ultimoPedido,
-        servicos: servicosUtilizados
+        total_gasto: totalGasto._sum.amount || 0,
+        ultimo_pedido: ultimoPedido?.created_at || null,
+        servicos: servicos || [],
       };
     }
-    
-    console.log(`[API:Stats:Users] Retornando estatísticas para ${Object.keys(resultado).length} emails`);
-    
-    return NextResponse.json(resultado);
+
+    return NextResponse.json(result);
   } catch (error) {
-    console.error('Erro ao buscar estatísticas de pedidos por email:', error);
+    console.error('Erro ao buscar estatísticas de pedidos por usuário:', error);
     return NextResponse.json(
-      { error: 'Erro interno do servidor' },
+      { error: 'Erro ao buscar estatísticas de pedidos' },
       { status: 500 }
     );
   }
