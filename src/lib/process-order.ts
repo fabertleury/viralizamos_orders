@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
 import { createSupabaseClient } from '../utils/supabase-client';
+import { updateTransactionMetadata } from './update-transaction-metadata';
 
 const prisma = new PrismaClient();
 
@@ -168,6 +169,26 @@ export async function processOrder(orderId: string): Promise<boolean> {
           }
         }
       });
+      
+      // Atualizar o metadata da transação no serviço de pagamentos
+      if (metadata.external_transaction_id || metadata.external_payment_id) {
+        const transactionId = metadata.external_transaction_id || metadata.external_payment_id;
+        console.log(`Atualizando metadata da transação ${transactionId} com o order_id ${orderId}`);
+        
+        try {
+          await updateTransactionMetadata(transactionId, orderId, {
+            external_order_id: response.data.order,
+            post_code: metadata.post?.post_code,
+            response_data: {
+              ...order,
+              provider_response: response.data
+            }
+          });
+        } catch (metadataError) {
+          console.error(`Erro ao atualizar metadata da transação ${transactionId}:`, metadataError);
+          // Não falhar o processamento do pedido se a atualização do metadata falhar
+        }
+      }
       
       return true;
     } else {
