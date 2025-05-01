@@ -1,12 +1,11 @@
 /**
  * Script para testar a atualização do metadata das transações
- * Este script simula o envio de um pedido para o endpoint de atualização
+ * Este script conecta diretamente ao banco de dados e atualiza o metadata da transação
  */
-const axios = require('axios');
+const { Client } = require('pg');
 
-// Configuração
-const API_URL = 'http://localhost:3000/api/orders/update-transaction';
-const API_KEY = process.env.ORDERS_API_KEY || 'test-api-key';
+// String de conexão com o banco de dados de pagamentos
+const paymentsDbUrl = 'postgresql://postgres:zacEqGceWerpWpBZZqttjamDOCcdhRbO@shinkansen.proxy.rlwy.net:29036/railway';
 
 // Dados para teste
 const testData = {
@@ -41,44 +40,105 @@ const testData = {
   }
 };
 
-// Função para enviar a requisição
-async function testUpdateTransaction() {
+// Função para atualizar o metadata da transação diretamente no banco de dados
+async function testUpdateTransactionMetadata() {
+  // Conectar ao banco de dados de pagamentos
+  const client = new Client({ connectionString: paymentsDbUrl });
+  
   try {
-    console.log('Enviando requisição para atualizar metadata da transação...');
-    console.log('Dados:', JSON.stringify(testData, null, 2));
+    console.log('Conectando ao banco de dados de pagamentos...');
+    await client.connect();
+    console.log('Conexão estabelecida com sucesso!');
     
-    const response = await axios.post(API_URL, testData, {
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY
-      }
-    });
+    // Verificar se a transação existe
+    console.log(`Verificando se a transação ${testData.transaction_id} existe...`);
+    const checkQuery = `
+      SELECT id, metadata 
+      FROM transactions 
+      WHERE id = $1
+    `;
     
-    console.log('Resposta:', response.status, response.statusText);
-    console.log('Dados da resposta:', response.data);
+    const checkResult = await client.query(checkQuery, [testData.transaction_id]);
+    
+    if (checkResult.rows.length === 0) {
+      console.error(`Transação ${testData.transaction_id} não encontrada!`);
+      return false;
+    }
+    
+    console.log('Transação encontrada!');
+    
+    // Obter o metadata atual
+    let currentMetadata = {};
+    try {
+      currentMetadata = JSON.parse(checkResult.rows[0].metadata || '{}');
+      console.log('Metadata atual:', JSON.stringify(currentMetadata, null, 2));
+    } catch (error) {
+      console.error('Erro ao analisar metadata atual:', error);
+      // Continuar com um objeto vazio
+    }
+    
+    // Atualizar o metadata
+    const updatedMetadata = { ...currentMetadata };
+    
+    // 1. Adicionar ao array processed_orders se não existir
+    if (!updatedMetadata.processed_orders) {
+      updatedMetadata.processed_orders = [];
+    }
+    
+    if (!updatedMetadata.processed_orders.includes(testData.order_id)) {
+      updatedMetadata.processed_orders.push(testData.order_id);
+    }
+    
+    // 2. Adicionar às provider_responses se não existir
+    if (!updatedMetadata.provider_responses) {
+      updatedMetadata.provider_responses = [];
+    }
+    
+    // Verificar se já existe uma resposta para este order_id
+    const existingResponseIndex = updatedMetadata.provider_responses.findIndex(
+      (response) => response.order_id === testData.order_id
+    );
+    
+    if (existingResponseIndex >= 0) {
+      // Atualizar a resposta existente
+      updatedMetadata.provider_responses[existingResponseIndex] = {
+        ...updatedMetadata.provider_responses[existingResponseIndex],
+        ...testData.provider_response
+      };
+    } else {
+      // Adicionar nova resposta
+      updatedMetadata.provider_responses.push({
+        order_id: testData.order_id,
+        ...testData.provider_response
+      });
+    }
+    
+    // Atualizar o metadata na tabela transactions
+    console.log('Atualizando metadata da transação...');
+    const updateQuery = `
+      UPDATE transactions
+      SET metadata = $1
+      WHERE id = $2
+    `;
+    
+    await client.query(updateQuery, [JSON.stringify(updatedMetadata), testData.transaction_id]);
+    
+    console.log('Metadata atualizado com sucesso!');
+    console.log('Novo metadata:', JSON.stringify(updatedMetadata, null, 2));
     
     return true;
   } catch (error) {
-    console.error('Erro ao atualizar metadata da transação:');
-    
-    if (error.response) {
-      // O servidor respondeu com um status de erro
-      console.error('Status:', error.response.status);
-      console.error('Dados:', error.response.data);
-    } else if (error.request) {
-      // A requisição foi feita mas não houve resposta
-      console.error('Sem resposta do servidor');
-    } else {
-      // Erro ao configurar a requisição
-      console.error('Erro:', error.message);
-    }
-    
+    console.error('Erro ao atualizar metadata da transação:', error);
     return false;
+  } finally {
+    // Fechar a conexão com o banco de dados
+    await client.end();
+    console.log('Conexão com o banco de dados fechada');
   }
 }
 
 // Executar o teste
-testUpdateTransaction()
+testUpdateTransactionMetadata()
   .then(success => {
     console.log(success ? 'Teste concluído com sucesso!' : 'Teste falhou!');
     process.exit(success ? 0 : 1);
