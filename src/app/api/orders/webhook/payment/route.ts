@@ -121,6 +121,15 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    // Verificar se posts foram fornecidos para serviços de curtidas
+    if (body.metadata.service_type === 'curtidas' && (!body.metadata.posts || body.metadata.posts.length === 0)) {
+      console.error('[Orders Webhook] Dados de posts não fornecidos para serviço de curtidas');
+      return NextResponse.json(
+        { success: false, error: 'Dados de posts não fornecidos no webhook' }, 
+        { status: 400 }
+      );
+    }
+    
     console.log('[Orders Webhook] Dados validados, iniciando processamento');
     console.log('[Orders Webhook] Transaction ID:', body.transaction_id);
     console.log('[Orders Webhook] Payment ID:', body.payment_id);
