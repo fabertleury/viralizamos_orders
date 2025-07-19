@@ -1856,6 +1856,24 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
         });
       }
       
+      // Verificar se o provider existe
+      let validProviderId = null;
+      if (metadata.provider_id) {
+        const providerExists = await prisma.provider.findUnique({
+          where: { id: metadata.provider_id }
+        });
+        
+        if (providerExists) {
+          validProviderId = metadata.provider_id;
+          console.log(`[Orders Webhook] Provider encontrado: ${validProviderId}`);
+        } else {
+          console.log(`[Orders Webhook] ATENÇÃO: Provider ${metadata.provider_id} não encontrado na base de dados!`);
+          console.log(`[Orders Webhook] Isso pode indicar um problema de sincronização entre sistemas.`);
+          console.log(`[Orders Webhook] Criando pedido sem provider_id para evitar falha.`);
+          validProviderId = null;
+        }
+      }
+      
       // Criar pedidos para cada post
       const createdOrders = [];
       
@@ -1866,6 +1884,7 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
             transaction_id,
             service_id: metadata.service || null,
             external_service_id: metadata.external_service_id || null,
+            provider_id: validProviderId, // Usar provider_id validado
             status: 'pending',
             target_username: metadata.profile || post.username || '',
             target_url: post.url || `https://instagram.com/p/${post.code}/`,

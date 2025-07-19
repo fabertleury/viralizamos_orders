@@ -166,10 +166,12 @@ export async function POST(request: NextRequest) {
     
     // Verificar se há provider_id no metadata
     const providerId = body.metadata.provider_id;
+    let finalProviderId = null;
+    
     if (providerId) {
       console.log(`[Orders Webhook] Provider ID encontrado no metadata: ${providerId}`);
       
-      // Buscar provider pelo ID
+      // Buscar provider pelo ID externo
       try {
         user = await prisma.user.findUnique({
           where: { id: providerId }
@@ -177,8 +179,24 @@ export async function POST(request: NextRequest) {
         
         if (user) {
           console.log(`[Orders Webhook] Provider encontrado com ID: ${user.id}`);
+          finalProviderId = user.id;
         } else {
-          console.log(`[Orders Webhook] Provider com ID ${providerId} não encontrado`);
+          console.log(`[Orders Webhook] Provider com ID ${providerId} não encontrado, buscando provider padrão`);
+          
+          // Buscar um provider padrão ativo
+          const defaultProvider = await prisma.user.findFirst({
+            where: { 
+              role: 'provider' // ou outro critério para identificar providers
+            }
+          });
+          
+          if (defaultProvider) {
+            finalProviderId = defaultProvider.id;
+            user = defaultProvider;
+            console.log(`[Orders Webhook] Usando provider padrão: ${finalProviderId}`);
+          } else {
+            console.log(`[Orders Webhook] Nenhum provider padrão encontrado`);
+          }
         }
       } catch (providerError) {
         console.error('[Orders Webhook] Erro ao buscar provider pelo ID:', providerError);
@@ -234,10 +252,10 @@ export async function POST(request: NextRequest) {
             data: {
               transaction_id: body.transaction_id,
               external_service_id: body.metadata.external_service_id,
-              provider_id: body.metadata.provider_id || user?.id || undefined,
+              provider_id: finalProviderId || user?.id || undefined,
               status: 'pending',
               amount: body.amount / postCount, // Dividir o valor total pelo número de posts
-              quantity: post.quantity || quantityPerPost,
+              quantity: Math.floor(post.quantity || quantityPerPost), // Garantir que seja número inteiro
               target_username: body.metadata.profile,
               target_url: post.url || `https://instagram.com/p/${post.code}`,
               customer_name: body.metadata.customer?.name || null,
@@ -288,10 +306,10 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: body.metadata.provider_id || user?.id || undefined, // Tornar opcional
+            provider_id: finalProviderId || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
-            quantity: body.metadata.total_quantity || 100,
+            quantity: Math.floor(body.metadata.total_quantity || 100), // Garantir que seja número inteiro
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
@@ -336,10 +354,10 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: body.metadata.provider_id || user?.id || undefined, // Tornar opcional
+            provider_id: finalProviderId || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
-            quantity: body.metadata.total_quantity || 100,
+            quantity: Math.floor(body.metadata.total_quantity || 100), // Garantir que seja número inteiro
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
