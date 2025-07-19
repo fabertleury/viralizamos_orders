@@ -29,11 +29,20 @@ export async function GET(request: NextRequest) {
       if (exactMatch) {
         whereClause.transaction_id = transactionId;
       } else {
-        // Busca insensitiva a maiúsculas/minúsculas e permite correspondência parcial
-        whereClause.transaction_id = {
-          contains: transactionId,
-          mode: 'insensitive'
-        };
+        // Remover hífens para busca mais flexível
+        const cleanTransactionId = transactionId.replace(/-/g, '');
+        
+        // Busca usando OR para tentar diferentes formatos
+        whereClause.OR = [
+          { transaction_id: { equals: transactionId, mode: 'insensitive' } },
+          { transaction_id: { contains: cleanTransactionId, mode: 'insensitive' } },
+          { transaction_id: { contains: transactionId, mode: 'insensitive' } }
+        ];
+        
+        // Remover a condição anterior se estamos usando OR
+        delete whereClause.transaction_id;
+        
+        console.log(`[Find] Buscando pedido com transaction_id: ${transactionId} ou formato alternativo: ${cleanTransactionId}`);
       }
     }
     
