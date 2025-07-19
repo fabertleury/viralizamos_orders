@@ -129,6 +129,13 @@ export async function POST(request: NextRequest) {
     console.log('[Orders Webhook] Service type:', body.metadata.service_type);
     console.log('[Orders Webhook] Is followers service:', body.metadata.is_followers_service);
     
+    // Ajustar dados para serviços de seguidores
+    if (body.metadata.service_type === 'seguidores') {
+      console.log('[Orders Webhook] Ajustando dados para serviço de seguidores');
+      body.metadata.is_followers_service = true;
+      body.metadata.total_quantity = body.metadata.total_quantity || 100;
+    }
+    
     // Verificar duplicidade - se já existe um pedido com este transaction_id
     const existingOrders = await prisma.order.findMany({
       where: {
