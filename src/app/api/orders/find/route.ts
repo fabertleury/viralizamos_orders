@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
       // Verificar se devemos fazer uma busca exata ou flexível
       if (exactMatch) {
         whereClause.transaction_id = transactionId;
+        console.log(`[Find] Buscando pedido com transaction_id exato: ${transactionId}`);
       } else {
         // Remover hífens para busca mais flexível
         const cleanTransactionId = transactionId.replace(/-/g, '');
@@ -36,13 +37,20 @@ export async function GET(request: NextRequest) {
         whereClause.OR = [
           { transaction_id: { equals: transactionId, mode: 'insensitive' } },
           { transaction_id: { contains: cleanTransactionId, mode: 'insensitive' } },
-          { transaction_id: { contains: transactionId, mode: 'insensitive' } }
+          { transaction_id: { contains: transactionId, mode: 'insensitive' } },
+          // Adicionar mais variações para aumentar a chance de encontrar
+          { transaction_id: { startsWith: transactionId.substring(0, 8), mode: 'insensitive' } },
+          { transaction_id: { endsWith: transactionId.substring(transactionId.length - 8), mode: 'insensitive' } }
         ];
         
         // Remover a condição anterior se estamos usando OR
         delete whereClause.transaction_id;
         
-        console.log(`[Find] Buscando pedido com transaction_id: ${transactionId} ou formato alternativo: ${cleanTransactionId}`);
+        console.log(`[Find] Buscando pedido com transaction_id flexível:`);
+        console.log(`[Find] - Original: ${transactionId}`);
+        console.log(`[Find] - Sem hífens: ${cleanTransactionId}`);
+        console.log(`[Find] - Primeiros 8 caracteres: ${transactionId.substring(0, 8)}`);
+        console.log(`[Find] - Últimos 8 caracteres: ${transactionId.substring(transactionId.length - 8)}`);
       }
     }
     
