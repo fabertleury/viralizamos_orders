@@ -1,0 +1,13 @@
+{
+  "name": "export-failed-orders",
+  "version": "1.0.0",
+  "description": "Script to export failed and cancelled orders to Excel",
+  "main": "export-failed-orders.js",
+  "scripts": {
+    "start": "node export-failed-orders.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.6.0",
+    "exceljs": "^4.4.0"
+  }
+}
