@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
             data: {
               transaction_id: body.transaction_id,
               external_service_id: body.metadata.external_service_id,
-              provider_id: user?.id,
+              provider_id: user?.id || undefined, // Tornar opcional
               status: 'pending',
               amount: body.amount / postCount, // Dividir o valor total pelo número de posts
               quantity: post.quantity || quantityPerPost,
@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: user?.id,
+            provider_id: user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
@@ -303,7 +303,7 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: user?.id,
+            provider_id: user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
