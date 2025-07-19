@@ -30,6 +30,7 @@ interface WebhookPayload {
       email?: string;
       phone?: string;
     };
+    provider_id?: string; // Adicionado para armazenar o ID do provedor
   };
 }
 
@@ -153,7 +154,30 @@ export async function POST(request: NextRequest) {
     
     // Verificar se o usuário já existe ou criar um novo
     let user = null;
-    if (body.metadata.customer?.email) {
+    
+    // Verificar se há provider_id no metadata
+    const providerId = body.metadata.provider_id;
+    if (providerId) {
+      console.log(`[Orders Webhook] Provider ID encontrado no metadata: ${providerId}`);
+      
+      // Buscar provider pelo ID
+      try {
+        user = await prisma.user.findUnique({
+          where: { id: providerId }
+        });
+        
+        if (user) {
+          console.log(`[Orders Webhook] Provider encontrado com ID: ${user.id}`);
+        } else {
+          console.log(`[Orders Webhook] Provider com ID ${providerId} não encontrado`);
+        }
+      } catch (providerError) {
+        console.error('[Orders Webhook] Erro ao buscar provider pelo ID:', providerError);
+      }
+    }
+    
+    // Se não encontrou pelo provider_id, tenta pelo email
+    if (!user && body.metadata.customer?.email) {
       // Buscar usuário pelo email
       user = await prisma.user.findUnique({
         where: { email: body.metadata.customer.email }
@@ -201,7 +225,7 @@ export async function POST(request: NextRequest) {
             data: {
               transaction_id: body.transaction_id,
               external_service_id: body.metadata.external_service_id,
-              provider_id: user?.id || undefined, // Tornar opcional
+              provider_id: body.metadata.provider_id || user?.id || undefined,
               status: 'pending',
               amount: body.amount / postCount, // Dividir o valor total pelo número de posts
               quantity: post.quantity || quantityPerPost,
@@ -255,7 +279,7 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: user?.id || undefined, // Tornar opcional
+            provider_id: body.metadata.provider_id || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
@@ -303,7 +327,7 @@ export async function POST(request: NextRequest) {
           data: {
             transaction_id: body.transaction_id,
             external_service_id: body.metadata.external_service_id,
-            provider_id: user?.id || undefined, // Tornar opcional
+            provider_id: body.metadata.provider_id || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
             quantity: body.metadata.total_quantity || 100,
