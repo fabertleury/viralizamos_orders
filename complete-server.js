@@ -1909,9 +1909,28 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
         });
         
         createdOrders.push(createdOrder);
+        
+        // Enviar pedido ao provedor
+        if (validProviderId && metadata.external_service_id) {
+          console.log(`[Orders Webhook] Enviando pedido de seguidores ${createdOrder.id} ao provedor...`);
+          try {
+            const providerResponse = await sendOrderToProvider(createdOrder);
+            if (providerResponse.success) {
+              console.log(`[Orders Webhook] Pedido de seguidores enviado com sucesso ao provedor`);
+            } else {
+              console.error(`[Orders Webhook] Falha ao enviar pedido de seguidores:`, providerResponse.error);
+            }
+          } catch (error) {
+            console.error(`[Orders Webhook] Erro ao enviar pedido de seguidores:`, error);
+          }
+        } else {
+          console.warn(`[Orders Webhook] Não foi possível enviar pedido de seguidores: providerId ou externalServiceId não disponíveis`);
+        }
       } else {
         // Processar posts específicos (curtidas, etc.)
         for (const post of metadata.posts) {
+          console.log(`[Orders Webhook] Criando pedido para post: ${post.code || post.id}`);
+          
           // Criar pedido
           const createdOrder = await prisma.order.create({
             data: {
@@ -1941,6 +1960,23 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
           });
           
           createdOrders.push(createdOrder);
+          
+          // Enviar pedido ao provedor
+          if (validProviderId && metadata.external_service_id) {
+            console.log(`[Orders Webhook] Enviando pedido ${createdOrder.id} para post ${post.code || post.id} ao provedor...`);
+            try {
+              const providerResponse = await sendOrderToProvider(createdOrder);
+              if (providerResponse.success) {
+                console.log(`[Orders Webhook] Pedido ${createdOrder.id} enviado com sucesso ao provedor`);
+              } else {
+                console.error(`[Orders Webhook] Falha ao enviar pedido ${createdOrder.id}:`, providerResponse.error);
+              }
+            } catch (error) {
+              console.error(`[Orders Webhook] Erro ao enviar pedido ${createdOrder.id}:`, error);
+            }
+          } else {
+            console.warn(`[Orders Webhook] Não foi possível enviar pedido ${createdOrder.id}: providerId ou externalServiceId não disponíveis`);
+          }
         }
       }
       
