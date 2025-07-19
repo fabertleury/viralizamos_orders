@@ -1849,7 +1849,10 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
       console.log(`Nenhum pedido encontrado para transaction_id ${transaction_id}, criando novos pedidos...`);
       
       // Se não houver pedidos, criar novos pedidos para os posts
-      if (!metadata || !metadata.posts || !Array.isArray(metadata.posts) || metadata.posts.length === 0) {
+      // Para serviços de curtidas, posts são obrigatórios
+      // Para serviços de seguidores, posts podem estar vazios
+      if (!metadata || 
+          (metadata.service_type === 'curtidas' && (!metadata.posts || !Array.isArray(metadata.posts) || metadata.posts.length === 0))) {
         return res.status(400).json({
           success: false,
           error: 'Dados de posts não fornecidos no webhook'
@@ -1874,21 +1877,24 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
         }
       }
       
-      // Criar pedidos para cada post
+      // Criar pedidos para cada post ou pedido único para seguidores
       const createdOrders = [];
       
-      for (const post of metadata.posts) {
-        // Criar pedido
+      // Verificar se é serviço de seguidores sem posts específicos
+      if (metadata.is_followers_service && (!metadata.posts || metadata.posts.length === 0)) {
+        console.log('[Orders Webhook] Criando pedido para serviço de seguidores');
+        
+        // Criar pedido único para seguidores
         const createdOrder = await prisma.order.create({
           data: {
             transaction_id,
             service_id: metadata.service || null,
             external_service_id: metadata.external_service_id || null,
-            provider_id: validProviderId, // Usar provider_id validado
+            provider_id: validProviderId,
             status: 'pending',
-            target_username: metadata.profile || post.username || '',
-            target_url: post.url || `https://instagram.com/p/${post.code}/`,
-            quantity: post.quantity || metadata.total_quantity || 100,
+            target_username: metadata.profile || '',
+            target_url: `https://instagram.com/${metadata.profile}`,
+            quantity: Math.floor(metadata.total_quantity || 100),
             customer_email: metadata.customer?.email || '',
             customer_name: metadata.customer?.name || '',
             metadata: {
@@ -1896,17 +1902,46 @@ app.post('/api/orders/webhook/payment', async (req, res) => {
                 received_at: new Date().toISOString(),
                 data: req.body
               },
-              post: {
-                post_id: post.id,
-                post_code: post.code,
-                post_url: post.url,
-                type: post.type || 'post'
-              }
+              service_type: 'followers',
+              external_service_id: metadata.external_service_id
             }
           }
         });
         
         createdOrders.push(createdOrder);
+      } else {
+        // Processar posts específicos (curtidas, etc.)
+        for (const post of metadata.posts) {
+          // Criar pedido
+          const createdOrder = await prisma.order.create({
+            data: {
+              transaction_id,
+              service_id: metadata.service || null,
+              external_service_id: metadata.external_service_id || null,
+              provider_id: validProviderId, // Usar provider_id validado
+              status: 'pending',
+              target_username: metadata.profile || post.username || '',
+              target_url: post.url || `https://instagram.com/p/${post.code}/`,
+              quantity: Math.floor(post.quantity || metadata.total_quantity || 100),
+              customer_email: metadata.customer?.email || '',
+              customer_name: metadata.customer?.name || '',
+              metadata: {
+                payment_webhook: {
+                  received_at: new Date().toISOString(),
+                  data: req.body
+                },
+                post: {
+                  post_id: post.id,
+                  post_code: post.code,
+                  post_url: post.url,
+                  type: post.type || 'post'
+                }
+              }
+            }
+          });
+          
+          createdOrders.push(createdOrder);
+        }
       }
       
       return res.status(201).json({
