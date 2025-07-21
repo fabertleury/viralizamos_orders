@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
     if (body.metadata.service_type === 'seguidores') {
       console.log('[Orders Webhook] Ajustando dados para serviço de seguidores');
       body.metadata.is_followers_service = true;
-      body.metadata.total_quantity = body.metadata.total_quantity || 100;
+      body.metadata.total_quantity = body.metadata.total_quantity || 1;
     }
     
     // Verificar duplicidade - se já existe um pedido com este transaction_id
@@ -238,7 +238,7 @@ export async function POST(request: NextRequest) {
     if (body.metadata.posts && body.metadata.posts.length > 0) {
       // Distribuir a quantidade igualmente entre os posts
       const postCount = body.metadata.posts.length;
-      const serviceQuantity = body.metadata.total_quantity || 100; // Usar total_quantity ou valor padrão
+      const serviceQuantity = body.metadata.total_quantity || 1; // Usar total_quantity ou valor padrão
       const quantityPerPost = Math.floor(serviceQuantity / postCount);
       
       console.log(`[Orders Webhook] Processando ${postCount} posts com ${quantityPerPost} cada`);
@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
             provider_id: finalProviderId || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
-            quantity: Math.floor(body.metadata.total_quantity || 100), // Garantir que seja número inteiro
+            quantity: Math.floor(body.metadata.total_quantity || 1), // Garantir que seja número inteiro
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,
@@ -357,7 +357,7 @@ export async function POST(request: NextRequest) {
             provider_id: finalProviderId || user?.id || undefined, // Tornar opcional
             status: 'pending',
             amount: body.amount,
-            quantity: Math.floor(body.metadata.total_quantity || 100), // Garantir que seja número inteiro
+            quantity: Math.floor(body.metadata.total_quantity || 1), // Garantir que seja número inteiro
             target_username: body.metadata.profile,
             customer_name: body.metadata.customer?.name || null,
             customer_email: body.metadata.customer?.email || null,

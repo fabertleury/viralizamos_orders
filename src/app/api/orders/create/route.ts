@@ -267,7 +267,7 @@ export async function POST(request: NextRequest) {
           external_order_id: body.external_order_id || null, // ID do pedido no sistema do provedor
           status: 'pending',
           amount: body.amount || 0,
-          quantity: body.quantity || 100,
+          quantity: body.quantity || 1,
           target_username: body.target_username,
           target_url: body.post_data?.post_url || body.target_url || `https://instagram.com/${body.target_username}`,
           customer_name: body.customer_name || null,
